@@ -13,7 +13,7 @@
         /// <param name="group"></param>
         /// <returns></returns>
         public static T Group<T>(this T builder, string group)
-            where T : AbstractTopicConsumerBuilder
+            where T : AbstractConsumerBuilder
         {
             builder.ConsumerSettings.SetGroup(group);
             return builder;
@@ -38,7 +38,7 @@
         /// <param name="numberOfMessages"></param>
         /// <returns></returns>
         public static T CheckpointEvery<T>(this T builder, int numberOfMessages)
-            where T : AbstractTopicConsumerBuilder
+            where T : AbstractConsumerBuilder
         {
             builder.ConsumerSettings.Properties[CheckpointSettings.CheckpointCount] = numberOfMessages;
             return builder;
@@ -51,7 +51,7 @@
         /// <param name="duration"></param>
         /// <returns></returns>
         public static T CheckpointAfter<T>(this T builder, TimeSpan duration)
-            where T : AbstractTopicConsumerBuilder
+            where T : AbstractConsumerBuilder
         {
             builder.ConsumerSettings.Properties[CheckpointSettings.CheckpointDuration] = duration;
             return builder;

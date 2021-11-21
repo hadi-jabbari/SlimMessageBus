@@ -22,7 +22,6 @@
             // assert
             subject.ConsumerSettings.MessageType.Should().Be(typeof(SomeRequest));
             subject.MessageType.Should().Be(typeof(SomeRequest));
-            subject.Path.Should().Be(path);
             subject.ConsumerSettings.Path.Should().Be(path);
             subject.ConsumerSettings.Instances.Should().Be(3);
             subject.ConsumerSettings.ConsumerType.Should().Be(typeof(SomeRequestMessageHandler));
