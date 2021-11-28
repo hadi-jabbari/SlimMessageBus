@@ -4,7 +4,7 @@ namespace SlimMessageBus.Host.Config
 
     public abstract class AbstractConsumerBuilder
     {
-        public Type MessageType { get; }
+        public Type MessageType => ConsumerSettings.MessageType;
 
         public MessageBusSettings Settings { get; }
 
@@ -12,9 +12,6 @@ namespace SlimMessageBus.Host.Config
 
         protected AbstractConsumerBuilder(MessageBusSettings settings, Type messageType, string path = null)
         {
-            Settings = settings;
-            MessageType = messageType;
-
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
 
             ConsumerSettings = new ConsumerSettings
