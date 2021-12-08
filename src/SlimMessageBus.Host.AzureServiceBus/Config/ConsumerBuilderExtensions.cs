@@ -9,7 +9,7 @@
         {
             if (builder is null) throw new ArgumentNullException(nameof(builder));
 
-            builder.Topic(queue);
+            builder.Path(queue);
             builder.ConsumerSettings.PathKind = PathKind.Queue;
             return builder;
         }
