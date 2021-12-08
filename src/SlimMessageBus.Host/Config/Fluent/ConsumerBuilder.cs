@@ -170,23 +170,23 @@ namespace SlimMessageBus.Host.Config
 
         /// <summary>
         /// Declares type <typeparamref name="TConsumer"/> as the consumer of messages <typeparamref name="TMessage"/>.
-        /// The consumer type has to have a method: <see cref="Task"/> <paramref name="methodName"/>(<typeparamref name="TMessage"/>, <see cref="string"/>).
+        /// The consumer type has to have a method: <see cref="Task"/> <paramref name="consumerMethodName"/>(<typeparamref name="TMessage"/>, <see cref="string"/>).
         /// </summary>
         /// <param name="consumerType"></param>
-        /// <param name="methodName">If null, will default to <see cref="IConsumer{TMessage}.OnHandle(TMessage, string)"/> </param>
+        /// <param name="consumerMethodName">If null, will default to <see cref="IConsumer{TMessage}.OnHandle(TMessage, string)"/> </param>
         /// <returns></returns>
-        public ConsumerBuilder<T> WithConsumer(Type consumerType, string methodName = null)
+        public ConsumerBuilder<T> WithConsumer(Type consumerType, string consumerMethodName = null)
         {
             if (consumerType == null) throw new ArgumentNullException(nameof(consumerType));
 
-            if (methodName == null)
+            if (consumerMethodName == null)
             {
-                methodName = nameof(IConsumer<object>.OnHandle);
+                consumerMethodName = nameof(IConsumer<object>.OnHandle);
             }
 
             ConsumerSettings.ConsumerMode = ConsumerMode.Consumer;
             ConsumerSettings.ConsumerType = consumerType;
-            SetupConsumerOnHandleMethod(ConsumerSettings, methodName);
+            SetupConsumerOnHandleMethod(ConsumerSettings, consumerMethodName);
 
             ConsumerSettings.ConsumersByMessageType.Add(typeof(T), ConsumerSettings);
 
