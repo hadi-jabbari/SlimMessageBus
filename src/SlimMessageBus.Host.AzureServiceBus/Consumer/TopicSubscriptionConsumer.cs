@@ -9,7 +9,7 @@
     {
         private readonly SubscriptionClient subscriptionClient;
 
-        public TopicSubscriptionConsumer(ServiceBusMessageBus messageBus, IEnumerable<ConsumerRegistration> consumers, string path, string subscriptionName)
+        public TopicSubscriptionConsumer(ServiceBusMessageBus messageBus, IEnumerable<IMessageProcessor<Message>> consumers, string path, string subscriptionName)
             : base(messageBus ?? throw new ArgumentNullException(nameof(messageBus)),
                 messageBus.ProviderSettings.SubscriptionClientFactory(new SubscriptionFactoryParams(path, subscriptionName)),
                 consumers,

@@ -9,7 +9,7 @@
     {
         private readonly IQueueClient queueClient;
 
-        public QueueConsumer(ServiceBusMessageBus messageBus, IEnumerable<ConsumerRegistration> consumers, string path)
+        public QueueConsumer(ServiceBusMessageBus messageBus, IEnumerable<IMessageProcessor<Message>> consumers, string path)
             : base(messageBus ?? throw new ArgumentNullException(nameof(messageBus)),
                   messageBus.ProviderSettings.QueueClientFactory(path),
                   consumers,
