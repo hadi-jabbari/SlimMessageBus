@@ -3,15 +3,15 @@
     using Microsoft.Azure.ServiceBus;
     using SlimMessageBus.Host.Config;
 
-    public class ConsumerRegistration
+    public class ConsumerInvoker
     {
-        public AbstractConsumerSettings Settings { get; }
         public IMessageProcessor<Message> Processor { get; }
+        public IMessageTypeConsumerInvokerSettings Invoker { get; }
 
-        public ConsumerRegistration(AbstractConsumerSettings settings, IMessageProcessor<Message> processor)
+        public ConsumerInvoker(IMessageProcessor<Message> processor, IMessageTypeConsumerInvokerSettings invoker)
         {
-            Settings = settings;
             Processor = processor;
+            Invoker = invoker;
         }
     }
 }

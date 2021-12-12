@@ -11,7 +11,7 @@
         /// <param name="builder"></param>
         /// <param name="group"></param>
         /// <returns></returns>
-        [Obsolete("User KafkaGroup() instead")]
+        [Obsolete("Use KafkaGroup() instead")]
         public static T Group<T>(this T builder, string group) where T : AbstractConsumerBuilder
             => builder.KafkaGroup(group);
 
@@ -29,7 +29,7 @@
         /// <param name="builder"></param>
         /// <param name="group"></param>
         /// <returns></returns>
-        [Obsolete("User KafkaGroup() instead")]
+        [Obsolete("Use KafkaGroup() instead")]
         public static RequestResponseBuilder Group(this RequestResponseBuilder builder, string group)
             => builder.KafkaGroup(group);
 

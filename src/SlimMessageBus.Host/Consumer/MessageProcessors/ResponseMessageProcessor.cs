@@ -10,21 +10,23 @@ namespace SlimMessageBus.Host
     /// <typeparam name="TMessage"></typeparam>
     public class ResponseMessageProcessor<TMessage> : IMessageProcessor<TMessage> where TMessage : class
     {
-        private readonly RequestResponseSettings _requestResponseSettings;
-        private readonly MessageBusBase _messageBus;
-        private readonly Func<TMessage, MessageWithHeaders> _messageProvider;
+        private readonly RequestResponseSettings requestResponseSettings;
+        private readonly MessageBusBase messageBus;
+        private readonly Func<TMessage, MessageWithHeaders> messageProvider;
 
         public ResponseMessageProcessor(RequestResponseSettings requestResponseSettings, MessageBusBase messageBus, Func<TMessage, MessageWithHeaders> messageProvider)
         {
-            _requestResponseSettings = requestResponseSettings ?? throw new ArgumentNullException(nameof(requestResponseSettings));
-            _messageBus = messageBus ?? throw new ArgumentNullException(nameof(messageBus));
-            _messageProvider = messageProvider ?? throw new ArgumentNullException(nameof(messageProvider));
+            this.requestResponseSettings = requestResponseSettings ?? throw new ArgumentNullException(nameof(requestResponseSettings));
+            this.messageBus = messageBus ?? throw new ArgumentNullException(nameof(messageBus));
+            this.messageProvider = messageProvider ?? throw new ArgumentNullException(nameof(messageProvider));
         }
 
-        public Task<Exception> ProcessMessage(TMessage message)
+        public AbstractConsumerSettings ConsumerSettings => requestResponseSettings;
+
+        public Task<Exception> ProcessMessage(TMessage message, IMessageTypeConsumerInvokerSettings consumerInvoker)
         {
-            var messageWithHeaders = _messageProvider(message);
-            return _messageBus.OnResponseArrived(messageWithHeaders.Payload, _requestResponseSettings.Path, messageWithHeaders.Headers);
+            var messageWithHeaders = messageProvider(message);
+            return messageBus.OnResponseArrived(messageWithHeaders.Payload, requestResponseSettings.Path, messageWithHeaders.Headers);
         }
 
         #region IDisposable

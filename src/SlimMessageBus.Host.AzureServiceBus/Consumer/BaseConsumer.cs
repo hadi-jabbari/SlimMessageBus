@@ -15,12 +15,15 @@
         private readonly ILogger logger;
         public ServiceBusMessageBus MessageBus { get; }
         protected IReceiverClient Client { get; }
-        protected IList<ConsumerRegistration> Consumers { get; }
-        protected IDictionary<Type, (ConsumerSettings Settings, IMessageProcessor<Message> Processor, IMessageTypeConsumerInvokerSettings Invoker)> InvokerByMessageType { get; }
+        protected IList<IMessageProcessor<Message>> Consumers { get; }
+        protected IDictionary<Type, ConsumerInvoker> InvokerByMessageType { get; }
+        protected ConsumerInvoker SingleInvoker { get; }
+        protected string Path { get; }
 
-        protected BaseConsumer(ServiceBusMessageBus messageBus, IReceiverClient client, IEnumerable<ConsumerRegistration> consumers, string pathName, ILogger logger)
+        protected BaseConsumer(ServiceBusMessageBus messageBus, IReceiverClient client, IEnumerable<IMessageProcessor<Message>> consumers, string path, ILogger logger)
         {
             this.logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            Path = path;
             MessageBus = messageBus ?? throw new ArgumentNullException(nameof(messageBus));
             Client = client ?? throw new ArgumentNullException(nameof(client));
             Consumers = consumers?.ToList() ?? throw new ArgumentNullException(nameof(consumers));
@@ -30,16 +33,23 @@
                 throw new InvalidOperationException($"The {nameof(consumers)} needs to be non empty");
             }
 
-            var instances = Consumers.First().Settings.Instances;
-            if (Consumers.Any(x => x.Settings.Instances != instances))
+            var instances = Consumers.First().ConsumerSettings.Instances;
+            if (Consumers.Any(x => x.ConsumerSettings.Instances != instances))
             {
-                throw new ConfigurationMessageBusException($"All declared consumers across the same path/subscription {pathName} must have the same Instances settings.");
+                throw new ConfigurationMessageBusException($"All declared consumers across the same path/subscription {path} must have the same Instances settings.");
             }
 
             InvokerByMessageType = Consumers
-                .Where(x => x.Settings is ConsumerSettings)
-                .SelectMany(x => ((ConsumerSettings)x.Settings).ConsumersByMessageType.Values.Select(invoker => (Settings: (ConsumerSettings)x.Settings, x.Processor, Invoker: invoker)))
+                .Where(x => x.ConsumerSettings is ConsumerSettings)
+                .SelectMany(x => ((ConsumerSettings)x.ConsumerSettings).ConsumersByMessageType.Values.Select(invoker => new ConsumerInvoker(x, invoker)))
+                .Concat(
+                    Consumers
+                    .Where(x => x.ConsumerSettings is RequestResponseSettings)
+                    .Select(x => new ConsumerInvoker(x, null))
+                )
                 .ToDictionary(x => x.Invoker.MessageType);
+
+            SingleInvoker = InvokerByMessageType.Count == 1 ? InvokerByMessageType.First().Value : null;
 
             // Configure the message handler options in terms of exception handling, number of concurrent messages to deliver, etc.
             var messageHandlerOptions = new MessageHandlerOptions(ExceptionReceivedHandler)
@@ -63,7 +73,7 @@
         {
             if (disposing)
             {
-                foreach (var messageProcessor in Consumers.Select(x => x.Processor))
+                foreach (var messageProcessor in Consumers)
                 {
                     messageProcessor.DisposeSilently();
                 }
@@ -78,19 +88,27 @@
 
         #endregion
 
-        protected virtual ConsumerRegistration TryMatchConsumer(Type messageType)
+        protected virtual ConsumerInvoker TryMatchConsumer(Type messageType)
         {
+            if (messageType == null && SingleInvoker == null)
+            {
+                throw new MessageBusException($"The message arrived without {MessageHeaders.MessageType} header on path {Path}, so it is imposible to match one of the known consumer types {string.Join(",", InvokerByMessageType.Values.Select(x => x.Invoker.ConsumerType.Name))}");
+            }
+
             if (messageType != null)
             {
                 // Find proper Consumer from Consumers based on the incoming message type
                 while (messageType.BaseType != typeof(object))
                 {
-                    InvokerByMessageType
+                    if (InvokerByMessageType.TryGetValue(messageType, out var consumerInvoker))
+                    {
+                        return consumerInvoker;
+                    }
                 }
             }
 
             // fallback to the first one
-            return Consumers[0];
+            return SingleInvoker;
         }
 
         protected async Task ProcessMessagesAsync(Message message, CancellationToken token)
@@ -98,10 +116,10 @@
             if (message is null) throw new ArgumentNullException(nameof(message));
 
             var messageType = GetMessageType(message);
-            var consumer = TryMatchConsumer(messageType);
+            var consumerInvoker = TryMatchConsumer(messageType);
 
             // Process the message.
-            var mf = consumer.Settings.FormatIf(message, logger.IsEnabled(LogLevel.Debug));
+            var mf = consumerInvoker.Processor.ConsumerSettings.FormatIf(message, logger.IsEnabled(LogLevel.Debug));
             logger.LogDebug("Received message - {0}", mf);
 
             if (token.IsCancellationRequested)
@@ -115,20 +133,20 @@
                 return;
             }
 
-            var exception = await consumer.Processor.ProcessMessage(message).ConfigureAwait(false);
+            var exception = await consumerInvoker.Processor.ProcessMessage(message, consumerInvoker.Invoker).ConfigureAwait(false);
             if (exception != null)
             {
                 if (mf == null)
                 {
-                    mf = consumer.Settings.FormatIf(message, true);
+                    mf = consumerInvoker.Processor.ConsumerSettings.FormatIf(message, true);
                 }
                 logger.LogError(exception, "Abandon message (exception occured while processing) - {0}", mf);
 
                 try
                 {
                     // Execute the event hook
-                    consumer.Settings.OnMessageFault?.Invoke(MessageBus, consumer.Settings, null, exception, message);
-                    MessageBus.Settings.OnMessageFault?.Invoke(MessageBus, consumer.Settings, null, exception, message);
+                    consumerInvoker.Processor.ConsumerSettings.OnMessageFault?.Invoke(MessageBus, consumerInvoker.Processor.ConsumerSettings, null, exception, message);
+                    MessageBus.Settings.OnMessageFault?.Invoke(MessageBus, consumerInvoker.Processor.ConsumerSettings, null, exception, message);
                 }
                 catch (Exception eh)
                 {

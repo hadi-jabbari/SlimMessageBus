@@ -43,7 +43,7 @@
                 () => new ConfigurationMessageBusException($"The {nameof(ConsumerSettings)}.{nameof(SettingsExtensions.SubscriptionName)} is not set on topic {consumerSettings.Path}"));
         }
 
-        protected void AddConsumer(string path, PathKind pathKind, string subscriptionName, IEnumerable<ConsumerRegistration> consumers)
+        protected void AddConsumer(string path, PathKind pathKind, string subscriptionName, IEnumerable<IMessageProcessor<Message>> consumers)
         {
             if (path is null) throw new ArgumentNullException(nameof(path));
             if (consumers is null) throw new ArgumentNullException(nameof(consumers));
@@ -93,7 +93,7 @@
             {
                 var key = consumerSettingsByPath.Key;
 
-                var consumers = consumerSettingsByPath.Select(x => new ConsumerRegistration(x, new ConsumerInstanceMessageProcessor<Message>(x, this, messageProvider, initConsumerContext))).ToList();
+                var consumers = consumerSettingsByPath.Select(x => new ConsumerInstanceMessageProcessor<Message>(x, this, messageProvider, initConsumerContext)).ToList();
                 AddConsumer(key.Path, key.PathKind, key.SubscriptionName, consumers);
             }
 
@@ -103,7 +103,7 @@
 
                 var consumers = new[]
                 {
-                    new ConsumerRegistration(Settings.RequestResponse, new ResponseMessageProcessor<Message>(Settings.RequestResponse, this, messageProvider))
+                    new ResponseMessageProcessor<Message>(Settings.RequestResponse, this, messageProvider)
                 };
                 AddConsumer(path, pathKind, subscriptionName, consumers);
             }
