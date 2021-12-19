@@ -17,6 +17,9 @@
         private readonly SemaphoreSlim concurrentSemaphore;
         private readonly IMessageProcessor<TMessage> target;
         private Exception lastException;
+        private TMessage lastExceptionMessage;
+        private object lastExceptionLock = new object();
+
         private int pendingCount;
 
         public int PendingCount => pendingCount;
@@ -48,11 +51,30 @@
             }
 
             Interlocked.Increment(ref pendingCount);
+
             // Fire and forget
             _ = ProcessInBackground(message, consumerInvoker);
 
             // Not exception - we don't know yet
             return null;
+        }
+
+        public TMessage GetMessageWithException()
+        {
+            lock (lastExceptionLock)
+            {
+                var m = lastExceptionMessage;
+                lastExceptionMessage = null;
+                return m;
+            }
+        }
+
+        public async Task WaitAll()
+        {
+            while(pendingCount > 0)
+            {
+                await Task.Delay(200).ConfigureAwait(false);
+            }
         }
 
         private async Task ProcessInBackground(TMessage message, IMessageTypeConsumerInvokerSettings consumerInvoker)
@@ -63,7 +85,15 @@
                 var exception = await target.ProcessMessage(message, consumerInvoker).ConfigureAwait(false);
                 if (exception != null)
                 {
-                    lastException = exception;
+                    lock (lastExceptionLock)
+                    {
+                        // ensure there was no error before this one, in which case forget about this error (the whole event stream will be rewind back).
+                        if (lastException == null && lastExceptionMessage == null)
+                        {
+                            lastException = exception;
+                            lastExceptionMessage = message;
+                        }
+                    }
                 }
             }
             finally
