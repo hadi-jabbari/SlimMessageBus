@@ -12,7 +12,7 @@
 
     using ConsumeResult = Confluent.Kafka.ConsumeResult<Confluent.Kafka.Ignore, byte[]>;
 
-    public class KafkaConsumerProcessorTest : IDisposable
+    public class KafkaPartitionConsumerForConsumersTest : IDisposable
     {
         private readonly TopicPartition _topicPartition;
         private readonly ILoggerFactory _loggerFactory;
@@ -23,9 +23,9 @@
 
         private readonly SomeMessageConsumer _consumer = new SomeMessageConsumer();
 
-        private readonly KafkaConsumerProcessor _subject;
+        private readonly KafkaPartitionConsumerForConsumers _subject;
 
-        public KafkaConsumerProcessorTest()
+        public KafkaPartitionConsumerForConsumersTest()
         {
             _loggerFactory = NullLoggerFactory.Instance;
 
@@ -49,8 +49,7 @@
             MessageWithHeaders MessageValueProvider(ConsumeResult m) => m.ToMessageWithHeaders(headerSerializer);
 
             var consumerInstancePoolMock = new Mock<ConsumerInstancePoolMessageProcessor<ConsumeResult>>(consumerSettings, massageBusMock.Bus, (Func<ConsumeResult, MessageWithHeaders>)MessageValueProvider, null);
-            _messageQueueWorkerMock = new Mock<MessageQueueWorker<ConsumeResult>>(consumerInstancePoolMock.Object, _checkpointTrigger.Object, _loggerFactory);
-            _subject = new KafkaConsumerProcessor(consumerSettings, _topicPartition, _commitControllerMock.Object, massageBusMock.Bus, _messageQueueWorkerMock.Object);
+            _subject = new KafkaPartitionConsumerForConsumers(consumerSettings, _topicPartition, _commitControllerMock.Object, massageBusMock.Bus, headerSerializer);
         }
 
         public void Dispose()
@@ -81,7 +80,7 @@
             _messageQueueWorkerMock.Setup(x => x.WaitAll()).ReturnsAsync(new MessageQueueResult<ConsumeResult> { Success = true, LastSuccessMessage = message });
 
             // act
-            await _subject.OnPartitionEndReached(message.TopicPartitionOffset);
+            _subject.OnPartitionEndReached(message.TopicPartitionOffset);
 
             // assert
             _commitControllerMock.Verify(x => x.Commit(message.TopicPartitionOffset.AddOffset(1)), Times.Once);
@@ -136,7 +135,7 @@
             _messageQueueWorkerMock.Setup(x => x.WaitAll()).ReturnsAsync(new MessageQueueResult<ConsumeResult> { Success = true, LastSuccessMessage = message });
 
             // act
-            await _subject.Commit();
+            _subject.Commit(message.TopicPartitionOffset);
 
             // assert
             _messageQueueWorkerMock.Verify(x => x.WaitAll(), Times.Once);

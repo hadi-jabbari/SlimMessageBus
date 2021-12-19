@@ -13,17 +13,17 @@
     /// </summary>
     public class EventHubMessageBus : MessageBusBase
     {
-        private readonly ILogger _logger;
+        private readonly ILogger logger;
 
         public EventHubMessageBusSettings ProviderSettings { get; }
 
-        private SafeDictionaryWrapper<string, EventHubClient> _producerByPath;
-        private List<GroupTopicConsumer> _consumers = new List<GroupTopicConsumer>();
+        private SafeDictionaryWrapper<string, EventHubClient> producerByPath;
+        private List<EhGroupConsumer> consumers = new List<EhGroupConsumer>();
 
         public EventHubMessageBus(MessageBusSettings settings, EventHubMessageBusSettings eventHubSettings)
             : base(settings)
         {
-            _logger = LoggerFactory.CreateLogger<EventHubMessageBus>();
+            logger = LoggerFactory.CreateLogger<EventHubMessageBus>();
             ProviderSettings = eventHubSettings;
 
             OnBuildProvider();
@@ -35,23 +35,23 @@
         {
             base.Build();
 
-            _producerByPath = new SafeDictionaryWrapper<string, EventHubClient>(path =>
+            producerByPath = new SafeDictionaryWrapper<string, EventHubClient>(path =>
             {
-                _logger.LogDebug("Creating EventHubClient for path {Path}", path);
+                logger.LogDebug("Creating EventHubClient for path {Path}", path);
                 return ProviderSettings.EventHubClientFactory(path);
             });
 
-            _logger.LogInformation("Creating consumers");
+            logger.LogInformation("Creating consumers");
             foreach (var consumerSettings in Settings.Consumers)
             {
-                _logger.LogInformation("Creating consumer for Path: {Path}, Group: {Group}, MessageType: {MessageType}", consumerSettings.Path, consumerSettings.GetGroup(), consumerSettings.MessageType);
-                _consumers.Add(new GroupTopicConsumer(this, consumerSettings));
+                logger.LogInformation("Creating consumer for Path: {Path}, Group: {Group}, MessageType: {MessageType}", consumerSettings.Path, consumerSettings.GetGroup(), consumerSettings.MessageType);
+                consumers.Add(new EhGroupConsumer(this, consumerSettings));
             }
 
             if (Settings.RequestResponse != null)
             {
-                _logger.LogInformation("Creating response consumer for Path: {Path}, Group: {Group}", Settings.RequestResponse.Path, Settings.RequestResponse.GetGroup());
-                _consumers.Add(new GroupTopicConsumer(this, Settings.RequestResponse));
+                logger.LogInformation("Creating response consumer for Path: {Path}, Group: {Group}", Settings.RequestResponse.Path, Settings.RequestResponse.GetGroup());
+                consumers.Add(new EhGroupConsumer(this, Settings.RequestResponse));
             }
         }
 
@@ -59,24 +59,24 @@
         {
             if (disposing)
             {
-                if (_consumers != null)
+                if (consumers != null)
                 {
-                    _consumers.ForEach(c => c.DisposeSilently("Consumer", _logger));
-                    _consumers.Clear();
+                    consumers.ForEach(c => c.DisposeSilently("Consumer", logger));
+                    consumers.Clear();
                 }
 
-                if (_producerByPath != null)
+                if (producerByPath != null)
                 {
-                    _producerByPath.Clear(producer =>
+                    producerByPath.Clear(producer =>
                     {
-                        _logger.LogDebug("Closing EventHubClient for path {Path}", producer.EventHubName);
+                        logger.LogDebug("Closing EventHubClient for path {Path}", producer.EventHubName);
                         try
                         {
                             producer.Close();
                         }
                         catch (Exception e)
                         {
-                            _logger.LogError(e, "Error while closing EventHubClient for path {Path}", producer.EventHubName);
+                            logger.LogError(e, "Error while closing EventHubClient for path {Path}", producer.EventHubName);
                         }
                     });
                 }
@@ -101,8 +101,8 @@
 
             AssertActive();
 
-            _logger.LogDebug("Producing message {Message} of type {MessageType} on path {Path} with size {MessageSize}", message, messageType.Name, path, messagePayload.Length);
-            var producer = _producerByPath.GetOrAdd(path);
+            logger.LogDebug("Producing message {Message} of type {MessageType} on path {Path} with size {MessageSize}", message, messageType.Name, path, messagePayload.Length);
+            var producer = producerByPath.GetOrAdd(path);
 
             using var ev = new EventData(messagePayload);
 
@@ -117,7 +117,7 @@
             // ToDo: Add support for partition keys
             await producer.SendAsync(ev).ConfigureAwait(false);
 
-            _logger.LogDebug("Delivered message {Message} of type {MessageType} on path {Path}", message, messageType.Name, path);
+            logger.LogDebug("Delivered message {Message} of type {MessageType} on path {Path}", message, messageType.Name, path);
         }
     }
 }

@@ -12,15 +12,15 @@
     using System.Text;
     using System.Collections.Generic;
 
-    public class KafkaResponseProcessorTest : IDisposable
+    public class KafkaPartitionConsumerForResponsesTest : IDisposable
     {
         private readonly MessageBusMock _messageBusMock;
         private readonly TopicPartition _topicPartition;
         private readonly Mock<IKafkaCommitController> _commitControllerMock = new Mock<IKafkaCommitController>();
         private readonly Mock<ICheckpointTrigger> _checkpointTrigger = new Mock<ICheckpointTrigger>();
-        private readonly KafkaResponseProcessor _subject;
+        private readonly KafkaPartitionConsumerForResponses _subject;
 
-        public KafkaResponseProcessorTest()
+        public KafkaPartitionConsumerForResponsesTest()
         {
             _topicPartition = new TopicPartition("topic-a", 0);
 
@@ -38,7 +38,7 @@
                 }
             };
 
-            _subject = new KafkaResponseProcessor(_messageBusMock.BusSettings.RequestResponse, _topicPartition, _commitControllerMock.Object, _messageBusMock.Bus, _messageBusMock.SerializerMock.Object, _checkpointTrigger.Object);
+            _subject = new KafkaPartitionConsumerForResponses(_messageBusMock.BusSettings.RequestResponse, _topicPartition, _commitControllerMock.Object, _messageBusMock.Bus, _messageBusMock.SerializerMock.Object);
         }
 
         [Fact]
@@ -48,13 +48,13 @@
         }
 
         [Fact]
-        public async Task WhenOnPartitionEndReachedThenShouldCommit()
+        public void WhenOnPartitionEndReachedThenShouldCommit()
         {
             // arrange
             var partition = new TopicPartitionOffset(_topicPartition, new Offset(10));
 
             // act
-            await _subject.OnPartitionEndReached(partition);
+            _subject.OnPartitionEndReached(partition);
 
             // assert
             _commitControllerMock.Verify(x => x.Commit(partition), Times.Once);
