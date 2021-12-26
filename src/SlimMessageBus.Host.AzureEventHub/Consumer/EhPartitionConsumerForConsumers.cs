@@ -8,8 +8,11 @@ namespace SlimMessageBus.Host.AzureEventHub
     /// </summary>
     public class EhPartitionConsumerForConsumers : EhPartitionConsumer
     {
+        private static void InitializeConsumerContext(EventData message, ConsumerContext consumerContext)
+            => consumerContext.SetTransportMessage(message);
+
         public EhPartitionConsumerForConsumers(EventHubMessageBus messageBus, ConsumerSettings consumerSettings)
-            : base(messageBus, consumerSettings, new ConsumerInstanceMessageProcessor<EventData>(consumerSettings, messageBus, GetMessageWithHeaders))
+            : base(messageBus, consumerSettings, new ConsumerInstanceMessageProcessor<EventData>(consumerSettings, messageBus, GetMessageWithHeaders, InitializeConsumerContext))
         {
         }
     }

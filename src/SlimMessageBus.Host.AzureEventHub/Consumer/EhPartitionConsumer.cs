@@ -138,7 +138,7 @@ namespace SlimMessageBus.Host.AzureEventHub
         {
             if (logger.IsEnabled(LogLevel.Debug))
             {
-                logger.LogDebug("Will checkpoint at Offset: {0}, {1}", message.SystemProperties.Offset, new PartitionContextInfo(context));
+                logger.LogDebug("Will checkpoint at Offset: {Offset}, PartitionId: {PartitionId}, Path: {Path}", message.SystemProperties.Offset, context.PartitionId, context.EventHubPath);
             }
             if (message != null)
             {
@@ -147,6 +147,6 @@ namespace SlimMessageBus.Host.AzureEventHub
             return Task.CompletedTask;
         }
 
-        protected static MessageWithHeaders GetMessageWithHeaders(EventData e) => new MessageWithHeaders(e.Body.Array, e.Properties);
+        protected static MessageWithHeaders GetMessageWithHeaders([NotNull] EventData e) => new MessageWithHeaders(e.Body.Array, e.Properties);
     }
 }

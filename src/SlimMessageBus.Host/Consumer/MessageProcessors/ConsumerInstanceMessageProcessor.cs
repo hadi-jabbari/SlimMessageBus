@@ -30,7 +30,7 @@
         {
             if (messageBus is null) throw new ArgumentNullException(nameof(messageBus));
 
-            logger = messageBus.LoggerFactory.CreateLogger<ConsumerInstancePoolMessageProcessor<TMessage>>();
+            logger = messageBus.LoggerFactory.CreateLogger<ConsumerInstanceMessageProcessor<TMessage>>();
             this.consumerSettings = consumerSettings ?? throw new ArgumentNullException(nameof(consumerSettings));
             this.messageBus = messageBus ?? throw new ArgumentNullException(nameof(messageBus));
             this.messageProvider = messageProvider ?? throw new ArgumentNullException(nameof(messageProvider));

@@ -9,7 +9,7 @@ namespace SlimMessageBus.Host.AzureEventHub
 
     public class EhGroupConsumer : IDisposable, IEventProcessorFactory
     {
-        private readonly ILogger _logger;
+        private readonly ILogger logger;
 
         public EventHubMessageBus MessageBus { get; }
 
@@ -21,7 +21,7 @@ namespace SlimMessageBus.Host.AzureEventHub
 
         public EhGroupConsumer(EventHubMessageBus messageBus, [NotNull] ConsumerSettings consumerSettings)
             : this(messageBus, new TopicGroup(consumerSettings.Path, consumerSettings.GetGroup()), () => new EhPartitionConsumerForConsumers(messageBus, consumerSettings))
-        {            
+        {
         }
 
         public EhGroupConsumer(EventHubMessageBus messageBus, [NotNull] RequestResponseSettings requestResponseSettings)
@@ -34,10 +34,10 @@ namespace SlimMessageBus.Host.AzureEventHub
             if (topicGroup is null) throw new ArgumentNullException(nameof(topicGroup));
 
             MessageBus = messageBus ?? throw new ArgumentNullException(nameof(messageBus));
-            _logger = messageBus.LoggerFactory.CreateLogger<EhGroupConsumer>();
+            logger = messageBus.LoggerFactory.CreateLogger<EhGroupConsumer>();
             this.partitionConsumerFactory = partitionConsumerFactory ?? throw new ArgumentNullException(nameof(partitionConsumerFactory));
 
-            _logger.LogInformation("Creating EventProcessorHost for EventHub with Topic: {0}, Group: {1}", topicGroup.Topic, topicGroup.Group);
+            logger.LogInformation("Creating EventProcessorHost for EventHub with Path: {Path}, Group: {Group}", topicGroup.Topic, topicGroup.Group);
             processorHost = MessageBus.ProviderSettings.EventProcessorHostFactory(topicGroup);
 
             var eventProcessorOptions = MessageBus.ProviderSettings.EventProcessorOptionsFactory(topicGroup);
@@ -62,7 +62,7 @@ namespace SlimMessageBus.Host.AzureEventHub
 
                 if (partitionConsumers.Count > 0)
                 {
-                    partitionConsumers.ForEach(ep => ep.DisposeSilently("EventProcessor", _logger));
+                    partitionConsumers.ForEach(ep => ep.DisposeSilently("EventProcessor", logger));
                     partitionConsumers.Clear();
                 }
             }
@@ -72,11 +72,11 @@ namespace SlimMessageBus.Host.AzureEventHub
 
         #region Implementation of IEventProcessorFactory
 
-        public IEventProcessor CreateEventProcessor(PartitionContext context)
+        public IEventProcessor CreateEventProcessor([NotNull] PartitionContext context)
         {
-            if (_logger.IsEnabled(LogLevel.Debug))
+            if (logger.IsEnabled(LogLevel.Debug))
             {
-                _logger.LogDebug("Creating {0} for {1}", nameof(IEventProcessor), new PartitionContextInfo(context));
+                logger.LogDebug("Creating IEventProcessor for Path: {Path}, PartitionId: {PartitionId}, Offset: {Offset}", context.EventHubPath, context.PartitionId, context.Lease.Offset);
             }
 
             var ep = partitionConsumerFactory();
