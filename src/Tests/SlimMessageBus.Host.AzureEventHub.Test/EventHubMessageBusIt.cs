@@ -63,7 +63,12 @@ namespace SlimMessageBus.Host.AzureEventHub.Test
         {
             if (disposing)
             {
+                var stopwatch = Stopwatch.StartNew();
+
                 MessageBus.Value.Dispose();
+
+                stopwatch.Stop();
+                logger.LogInformation("Disposed bus in {0}", stopwatch.Elapsed);                
             }
         }
 
@@ -71,13 +76,13 @@ namespace SlimMessageBus.Host.AzureEventHub.Test
         public async Task BasicPubSub()
         {
             // arrange
-            var topic = "test-ping";
+            var hubName = "test-ping";
 
             var pingConsumer = new PingConsumer(loggerFactory.CreateLogger<PingConsumer>());
 
             MessageBusBuilder
-                .Produce<PingMessage>(x => x.DefaultTopic(topic))
-                .Consume<PingMessage>(x => x.Topic(topic)
+                .Produce<PingMessage>(x => x.DefaultTopic(hubName))
+                .Consume<PingMessage>(x => x.Topic(hubName)
                                                 .Group("subscriber") // ensure consumer group exists on the event hub
                                                 .WithConsumer<PingConsumer>()
                                                 .Instances(2))
@@ -99,11 +104,10 @@ namespace SlimMessageBus.Host.AzureEventHub.Test
                 .Select(i => new PingMessage { Counter = i, Timestamp = DateTime.UtcNow })
                 .ToList();
 
-            foreach(var m in messages)
+            foreach (var m in messages)
             {
                 await messageBus.Publish(m);
             }
-            //await Task.WhenAll(messages.Select(m => messageBus.Publish(m)));
 
             stopwatch.Stop();
             logger.LogInformation("Published {0} messages in {1}", messages.Count, stopwatch.Elapsed);
@@ -184,7 +188,7 @@ namespace SlimMessageBus.Host.AzureEventHub.Test
             var lastMessageCount = 0;
             var lastMessageStopwatch = Stopwatch.StartNew();
 
-            const int newMessagesAwaitingTimeout = 5;
+            const int newMessagesAwaitingTimeout = 3;
 
             while (lastMessageStopwatch.Elapsed.TotalSeconds < newMessagesAwaitingTimeout)
             {
@@ -232,7 +236,7 @@ namespace SlimMessageBus.Host.AzureEventHub.Test
 
                 var msg = Context.GetTransportMessage();
 
-                logger.LogInformation("Got message {0} on topic {1} offset {2}.", message.Counter, path, msg.SystemProperties.Offset);
+                logger.LogInformation("Got message {0:000} on topic {1} offset {2} partition key {3}.", message.Counter, path, msg.SystemProperties.Offset, msg.SystemProperties.PartitionKey);
                 return Task.CompletedTask;
             }
 

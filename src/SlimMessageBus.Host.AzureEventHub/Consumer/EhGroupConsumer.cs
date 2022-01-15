@@ -1,10 +1,12 @@
 namespace SlimMessageBus.Host.AzureEventHub
 {
     using System;
-    using System.Collections.Generic;
     using System.Diagnostics.CodeAnalysis;
+    using System.Linq;
+    using System.Threading.Tasks;
     using Microsoft.Azure.EventHubs.Processor;
     using Microsoft.Extensions.Logging;
+    using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.Config;
 
     public class EhGroupConsumer : IDisposable, IEventProcessorFactory
@@ -14,28 +16,27 @@ namespace SlimMessageBus.Host.AzureEventHub
         public EventHubMessageBus MessageBus { get; }
 
         private readonly EventProcessorHost processorHost;
-        private readonly Func<EhPartitionConsumer> partitionConsumerFactory;
-        private readonly List<EhPartitionConsumer> partitionConsumers = new List<EhPartitionConsumer>();
-
-        private readonly TaskMarker taskMarker = new TaskMarker();
+        private readonly SafeDictionaryWrapper<string, EhPartitionConsumer> partitionConsumerByPartitionId;
 
         public EhGroupConsumer(EventHubMessageBus messageBus, [NotNull] ConsumerSettings consumerSettings)
-            : this(messageBus, new TopicGroup(consumerSettings.Path, consumerSettings.GetGroup()), () => new EhPartitionConsumerForConsumers(messageBus, consumerSettings))
+            : this(messageBus, new TopicGroup(consumerSettings.Path, consumerSettings.GetGroup()), (partitionId) => new EhPartitionConsumerForConsumers(messageBus, consumerSettings, partitionId))
         {
         }
 
         public EhGroupConsumer(EventHubMessageBus messageBus, [NotNull] RequestResponseSettings requestResponseSettings)
-            : this(messageBus, new TopicGroup(requestResponseSettings.Path, requestResponseSettings.GetGroup()), () => new EhPartitionConsumerForResponses(messageBus, requestResponseSettings))
+            : this(messageBus, new TopicGroup(requestResponseSettings.Path, requestResponseSettings.GetGroup()), (partitionId) => new EhPartitionConsumerForResponses(messageBus, requestResponseSettings, partitionId))
         {
         }
 
-        protected EhGroupConsumer(EventHubMessageBus messageBus, TopicGroup topicGroup, Func<EhPartitionConsumer> partitionConsumerFactory)
+        protected EhGroupConsumer(EventHubMessageBus messageBus, TopicGroup topicGroup, Func<string, EhPartitionConsumer> partitionConsumerFactory)
         {
-            if (topicGroup is null) throw new ArgumentNullException(nameof(topicGroup));
+            _ = topicGroup ?? throw new ArgumentNullException(nameof(topicGroup));
+            _ = partitionConsumerFactory ?? throw new ArgumentNullException(nameof(partitionConsumerFactory));
 
             MessageBus = messageBus ?? throw new ArgumentNullException(nameof(messageBus));
             logger = messageBus.LoggerFactory.CreateLogger<EhGroupConsumer>();
-            this.partitionConsumerFactory = partitionConsumerFactory ?? throw new ArgumentNullException(nameof(partitionConsumerFactory));
+
+            partitionConsumerByPartitionId = new SafeDictionaryWrapper<string, EhPartitionConsumer>(partitionConsumerFactory);
 
             logger.LogInformation("Creating EventProcessorHost for EventHub with Path: {Path}, Group: {Group}", topicGroup.Topic, topicGroup.Group);
             processorHost = MessageBus.ProviderSettings.EventProcessorHostFactory(topicGroup);
@@ -52,18 +53,35 @@ namespace SlimMessageBus.Host.AzureEventHub
             GC.SuppressFinalize(this);
         }
 
+        public async Task Stop()
+        {
+            var partitionConsumers = partitionConsumerByPartitionId.Snapshot();
+            foreach(var pc in partitionConsumers)
+            {
+                // stop all partition consumer to not access any more message
+                pc.Stop();
+            }
+
+            if (MessageBus.ProviderSettings.EnableCheckpointOnBusStop)
+            {
+                // checkpoint anything we've processed thus far
+                await Task.WhenAll(partitionConsumers.Select(pc => pc.Checkpoint()));
+            }
+
+            // stop the processing host
+            await processorHost.UnregisterEventProcessorAsync();
+        }
+
         protected virtual void Dispose(bool disposing)
         {
             if (disposing)
             {
-                processorHost.UnregisterEventProcessorAsync().Wait();
+                Stop().Wait();
 
-                taskMarker.Stop().Wait();
-
-                if (partitionConsumers.Count > 0)
+                var partitionConsumers = partitionConsumerByPartitionId.Snapshot();
+                foreach (var pc in partitionConsumers)
                 {
-                    partitionConsumers.ForEach(ep => ep.DisposeSilently("EventProcessor", logger));
-                    partitionConsumers.Clear();
+                    pc.DisposeSilently();
                 }
             }
         }
@@ -79,8 +97,7 @@ namespace SlimMessageBus.Host.AzureEventHub
                 logger.LogDebug("Creating IEventProcessor for Path: {Path}, PartitionId: {PartitionId}, Offset: {Offset}", context.EventHubPath, context.PartitionId, context.Lease.Offset);
             }
 
-            var ep = partitionConsumerFactory();
-            partitionConsumers.Add(ep);
+            var ep = partitionConsumerByPartitionId.GetOrAdd(context.PartitionId);
             return ep;
         }
 

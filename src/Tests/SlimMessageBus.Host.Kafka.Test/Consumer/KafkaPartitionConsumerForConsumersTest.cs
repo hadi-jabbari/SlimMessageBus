@@ -73,7 +73,7 @@
         }
 
         [Fact]
-        public async Task WhenOnPartitionEndReachedThenShouldCommit()
+        public void WhenOnPartitionEndReachedThenShouldCommit()
         {
             // arrange
             var message = GetSomeMessage();
@@ -128,7 +128,7 @@
         }
 
         [Fact]
-        public async Task WhenCommitThenShouldSyncPendingMessages()
+        public void WhenCommitThenShouldSyncPendingMessages()
         {
             // arrange
             var message = GetSomeMessage();

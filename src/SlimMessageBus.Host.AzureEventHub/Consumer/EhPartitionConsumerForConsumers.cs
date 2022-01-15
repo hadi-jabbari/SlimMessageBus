@@ -11,8 +11,8 @@ namespace SlimMessageBus.Host.AzureEventHub
         private static void InitializeConsumerContext(EventData message, ConsumerContext consumerContext)
             => consumerContext.SetTransportMessage(message);
 
-        public EhPartitionConsumerForConsumers(EventHubMessageBus messageBus, ConsumerSettings consumerSettings)
-            : base(messageBus, consumerSettings, new ConsumerInstanceMessageProcessor<EventData>(consumerSettings, messageBus, GetMessageWithHeaders, InitializeConsumerContext))
+        public EhPartitionConsumerForConsumers(EventHubMessageBus messageBus, ConsumerSettings consumerSettings, string partitionId)
+            : base(messageBus, consumerSettings, new ConsumerInstanceMessageProcessor<EventData>(consumerSettings, messageBus, GetMessageWithHeaders, InitializeConsumerContext), partitionId)
         {
         }
     }
