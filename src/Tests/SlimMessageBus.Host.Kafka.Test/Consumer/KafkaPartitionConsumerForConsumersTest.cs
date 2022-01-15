@@ -18,12 +18,12 @@
         private readonly ILoggerFactory _loggerFactory;
 
         private readonly Mock<IKafkaCommitController> _commitControllerMock = new Mock<IKafkaCommitController>();
-        private readonly Mock<ICheckpointTrigger> _checkpointTrigger = new Mock<ICheckpointTrigger>();
-        private readonly Mock<MessageQueueWorker<ConsumeResult>> _messageQueueWorkerMock;
+
+        private readonly ConsumerBuilder<SomeMessage> _consumerBuilder;
 
         private readonly SomeMessageConsumer _consumer = new SomeMessageConsumer();
 
-        private readonly KafkaPartitionConsumerForConsumers _subject;
+        private readonly Lazy<KafkaPartitionConsumerForConsumers> _subject;
 
         public KafkaPartitionConsumerForConsumersTest()
         {
@@ -31,25 +31,21 @@
 
             _topicPartition = new TopicPartition("topic-a", 0);
 
-            var consumerSettings = new ConsumerSettings
-            {
-                MessageType = typeof(SomeMessage),
-                Path = _topicPartition.Topic,
-                ConsumerType = typeof(SomeMessageConsumer),
-                ConsumerMode = ConsumerMode.Consumer,
-            };
-            consumerSettings.SetGroup("group-a");
+            _consumerBuilder = new ConsumerBuilder<SomeMessage>(new MessageBusSettings());
+            _consumerBuilder.Path(_topicPartition.Topic);
+            _consumerBuilder.WithConsumer<SomeMessageConsumer>();
+            _consumerBuilder.KafkaGroup("group-a");
 
             var massageBusMock = new MessageBusMock();
-            massageBusMock.BusSettings.Consumers.Add(consumerSettings);
+            massageBusMock.BusSettings.Consumers.Add(_consumerBuilder.ConsumerSettings);
             massageBusMock.DependencyResolverMock.Setup(x => x.Resolve(typeof(SomeMessageConsumer))).Returns(_consumer);
             massageBusMock.DependencyResolverMock.Setup(x => x.Resolve(typeof(ILoggerFactory))).Returns(_loggerFactory);
 
             var headerSerializer = new StringValueSerializer();
             MessageWithHeaders MessageValueProvider(ConsumeResult m) => m.ToMessageWithHeaders(headerSerializer);
 
-            var consumerInstancePoolMock = new Mock<ConsumerInstancePoolMessageProcessor<ConsumeResult>>(consumerSettings, massageBusMock.Bus, (Func<ConsumeResult, MessageWithHeaders>)MessageValueProvider, null);
-            _subject = new KafkaPartitionConsumerForConsumers(consumerSettings, _topicPartition, _commitControllerMock.Object, massageBusMock.Bus, headerSerializer);
+            var consumerInstancePoolMock = new Mock<ConsumerInstanceMessageProcessor<ConsumeResult>>(_consumerBuilder.ConsumerSettings, massageBusMock.Bus, (Func<ConsumeResult, MessageWithHeaders>)MessageValueProvider, null);
+            _subject = new Lazy<KafkaPartitionConsumerForConsumers>(() => new KafkaPartitionConsumerForConsumers(_consumerBuilder.ConsumerSettings, _topicPartition, _commitControllerMock.Object, massageBusMock.Bus, headerSerializer));
         }
 
         public void Dispose()
@@ -62,93 +58,71 @@
         {
             if (disposing)
             {
-                _subject.Dispose();
+                _subject.Value.Dispose();
             }
         }
 
         [Fact]
-        public void WhenNewInstanceThenTopicPartitionSet()
+        public void When_NewInstance_Then_TopicPartitionSet()
         {
-            _subject.TopicPartition.Should().Be(_topicPartition);
+            _subject.Value.TopicPartition.Should().Be(_topicPartition);
         }
 
         [Fact]
-        public void WhenOnPartitionEndReachedThenShouldCommit()
+        public async Task When_OnPartitionEndReached_Then_ShouldCommit()
         {
             // arrange
             var message = GetSomeMessage();
-            _messageQueueWorkerMock.Setup(x => x.WaitAll()).ReturnsAsync(new MessageQueueResult<ConsumeResult> { Success = true, LastSuccessMessage = message });
+            await _subject.Value.OnMessage(message);
 
             // act
-            _subject.OnPartitionEndReached(message.TopicPartitionOffset);
+            _subject.Value.OnPartitionEndReached(message.TopicPartitionOffset);
 
             // assert
-            _commitControllerMock.Verify(x => x.Commit(message.TopicPartitionOffset.AddOffset(1)), Times.Once);
+            _commitControllerMock.Verify(x => x.Commit(message.TopicPartitionOffset), Times.Once);
         }
 
         [Fact]
-        public void WhenOnPartitionRevokedThenShouldClearWorkerQueue()
-        {
-            // arrange
-
-            // act
-            _subject.OnPartitionRevoked();
-
-            // assert
-            _messageQueueWorkerMock.Verify(x => x.Clear(), Times.Once);
-        }
-
-        [Fact]
-        public async Task WhenOnMessageAndWorkerQueueSubmitReturnTrueThenShouldCommit()
+        public async Task When_OnPartitionRevoked_Then_ShouldNeverCommit()
         {
             // arrange
             var message = GetSomeMessage();
-            _messageQueueWorkerMock.Setup(x => x.WaitAll()).ReturnsAsync(new MessageQueueResult<ConsumeResult> { Success = true, LastSuccessMessage = message });
-            _messageQueueWorkerMock.Setup(x => x.Submit(message)).Returns(true);
+            await _subject.Value.OnMessage(message);
 
             // act
-            await _subject.OnMessage(message);
-
-            // assert
-            _commitControllerMock.Verify(x => x.Commit(message.TopicPartitionOffset.AddOffset(1)), Times.Once);
-        }
-
-        [Fact]
-        public async Task WhenOnMessageAndWorkerQueueSubmitReturnFalseThenShouldNotCommit()
-        {
-            // arrange
-            var message = GetSomeMessage();
-            _messageQueueWorkerMock.Setup(x => x.Submit(message)).Returns(false);
-
-            // act
-            await _subject.OnMessage(message);
+            _subject.Value.OnPartitionRevoked();
 
             // assert
             _commitControllerMock.Verify(x => x.Commit(It.IsAny<TopicPartitionOffset>()), Times.Never);
         }
 
         [Fact]
-        public void WhenCommitThenShouldSyncPendingMessages()
+        public async Task When_OnMessage_Given_CheckpointTriggerFires_Then_ShouldCommit()
         {
             // arrange
-            var message = GetSomeMessage();
-            _messageQueueWorkerMock.Setup(x => x.WaitAll()).ReturnsAsync(new MessageQueueResult<ConsumeResult> { Success = true, LastSuccessMessage = message });
+            _consumerBuilder.CheckpointEvery(3);
+            _consumerBuilder.CheckpointAfter(TimeSpan.FromSeconds(60));
+
+            var message1 = GetSomeMessage(offsetAdd: 0);
+            var message2 = GetSomeMessage(offsetAdd: 1);
+            var message3 = GetSomeMessage(offsetAdd: 2);
 
             // act
-            _subject.Commit(message.TopicPartitionOffset);
+            await _subject.Value.OnMessage(message1);
+            await _subject.Value.OnMessage(message2);
+            await _subject.Value.OnMessage(message3);
 
             // assert
-            _messageQueueWorkerMock.Verify(x => x.WaitAll(), Times.Once);
-            _commitControllerMock.Verify(x => x.Commit(message.TopicPartitionOffset.AddOffset(1)), Times.Once);
+            _commitControllerMock.Verify(x => x.Commit(message3.TopicPartitionOffset), Times.Once);
         }
 
-        private ConsumeResult GetSomeMessage()
+        private ConsumeResult GetSomeMessage(int offsetAdd = 0)
         {
             return new ConsumeResult
             {
                 Topic = _topicPartition.Topic,
                 Partition = _topicPartition.Partition,
-                Offset = 10,
+                Offset = 10 + offsetAdd,
                 Message = new Message<Ignore, byte[]> { Key = null, Value = new byte[] { 10, 20 } },
                 IsPartitionEOF = false,
             };

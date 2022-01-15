@@ -33,7 +33,7 @@ namespace SlimMessageBus.Host.Kafka
 
             _logger = messageBus.LoggerFactory.CreateLogger<KafkaGroupConsumer>();
 
-            _logger.LogInformation("Creating for group: {0}, topics: {1}", group, string.Join(", ", topics));
+            _logger.LogInformation("Creating for Group: {0}, Topics: {1}", group, string.Join(", ", topics));
 
             _processors = new SafeDictionaryWrapper<TopicPartition, IKafkaPartitionConsumer>(tp => processorFactory(tp, this));
 
@@ -110,10 +110,10 @@ namespace SlimMessageBus.Host.Kafka
         /// </summary>
         protected virtual async Task ConsumerLoop()
         {
-            _logger.LogInformation("Group [{group}]: Subscribing to topics: {topics}", Group, string.Join(", ", Topics));
+            _logger.LogInformation("Group [{Group}]: Subscribing to topics: {Topics}", Group, string.Join(", ", Topics));
             _consumer.Subscribe(Topics);
 
-            _logger.LogInformation("Group [{group}]: Consumer loop started", Group);
+            _logger.LogInformation("Group [{Group}]: Consumer loop started", Group);
             try
             {
                 try
@@ -122,7 +122,7 @@ namespace SlimMessageBus.Host.Kafka
                     {
                         try
                         {
-                            _logger.LogTrace("Group [{group}]: Polling consumer", Group);
+                            _logger.LogTrace("Group [{Group}]: Polling consumer", Group);
                             var consumeResult = _consumer.Consume(cancellationToken);
                             if (consumeResult.IsPartitionEOF)
                             {
@@ -137,30 +137,33 @@ namespace SlimMessageBus.Host.Kafka
                         {
                             var pollRetryInterval = MessageBus.ProviderSettings.ConsumerPollRetryInterval;
 
-                            _logger.LogError(e, "Group [{group}]: Error occured while polling new messages (will retry in {retryInterval}) - {reason}", Group, pollRetryInterval, e.Error.Reason);
+                            _logger.LogError(e, "Group [{Group}]: Error occured while polling new messages (will retry in {RetryInterval}) - {Reason}", Group, pollRetryInterval, e.Error.Reason);
                             await Task.Delay(pollRetryInterval, _consumerCts.Token).ConfigureAwait(false);
                         }
                     }
                 }
-                catch (OperationCanceledException e)
+                catch (OperationCanceledException)
                 {
                 }
 
-                _logger.LogInformation("Group [{group}]: Unsubscribing from topics", Group);
+                _logger.LogInformation("Group [{Group}]: Unsubscribing from topics", Group);
                 _consumer.Unsubscribe();
 
-                OnClose();
+                if (MessageBus.ProviderSettings.EnableCommitOnBusStop)
+                {
+                    OnClose();
+                }
 
                 // Ensure the consumer leaves the group cleanly and final offsets are committed.
                 _consumer.Close();
             }
             catch (Exception e)
             {
-                _logger.LogError(e, "Group [{group}]: Error occured in group loop (terminated)", Group);
+                _logger.LogError(e, "Group [{Group}]: Error occured in group loop (terminated)", Group);
             }
             finally
             {
-                _logger.LogInformation("Group [{group}]: Consumer loop finished", Group);
+                _logger.LogInformation("Group [{Group}]: Consumer loop finished", Group);
             }
         }
 
@@ -190,10 +193,7 @@ namespace SlimMessageBus.Host.Kafka
             // Ensure processors exist for each assigned topic-partition
             foreach (var partition in partitions)
             {
-                if (_logger.IsEnabled(LogLevel.Debug))
-                {
-                    _logger.LogDebug("Group [{Group}]: Assigned partition, Topic: {Topic}, Partition: {Partition}", Group, partition.Topic, partition.Partition);
-                }
+                _logger.LogDebug("Group [{Group}]: Assigned partition, Topic: {Topic}, Partition: {Partition}", Group, partition.Topic, partition.Partition);
 
                 var processor = _processors.GetOrAdd(partition);
                 processor.OnPartitionAssigned(partition);
@@ -204,10 +204,7 @@ namespace SlimMessageBus.Host.Kafka
         {
             foreach (var partition in partitions)
             {
-                if (_logger.IsEnabled(LogLevel.Debug))
-                {
-                    _logger.LogDebug("Group [{Group}]: Revoked Topic: {Topic}, Partition: {Partition}, Offset: {Offset}", Group, partition.Topic, partition.Partition, partition.Offset);
-                }
+                _logger.LogDebug("Group [{Group}]: Revoked Topic: {Topic}, Partition: {Partition}, Offset: {Offset}", Group, partition.Topic, partition.Partition, partition.Offset);
 
                 var processor = _processors.Dictonary[partition.TopicPartition];
                 processor.OnPartitionRevoked();
@@ -234,23 +231,18 @@ namespace SlimMessageBus.Host.Kafka
         {
             if (e.Error.IsError || e.Error.IsFatal)
             {
-                if (_logger.IsEnabled(LogLevel.Warning))
-                {
-                    _logger.LogWarning("Group [{Group}]: Failed to commit offsets: [{offsets}], error: {error}", Group, string.Join(", ", e.Offsets), e.Error.Reason);
-                }
+                _logger.LogWarning("Group [{Group}]: Failed to commit offsets: [{Offsets}], error: {error}", Group, string.Join(", ", e.Offsets), e.Error.Reason);
             }
             else
             {
-                if (_logger.IsEnabled(LogLevel.Trace))
-                {
-                    _logger.LogTrace("Group [{Group}]: Successfully committed offsets: [{offsets}]", Group, string.Join(", ", e.Offsets));
-                }
+                _logger.LogTrace("Group [{Group}]: Successfully committed offsets: [{Offsets}]", Group, string.Join(", ", e.Offsets));
             }
         }
 
         protected virtual void OnClose()
         {
-            foreach (var processor in _processors.Dictonary.Values)
+            var processors = _processors.Snapshot();
+            foreach (var processor in processors)
             {
                 processor.OnClose();
             }

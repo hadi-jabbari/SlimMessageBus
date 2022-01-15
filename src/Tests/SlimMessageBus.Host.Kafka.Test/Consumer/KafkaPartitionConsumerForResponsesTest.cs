@@ -38,17 +38,20 @@
                 }
             };
 
-            _subject = new KafkaPartitionConsumerForResponses(_messageBusMock.BusSettings.RequestResponse, _topicPartition, _commitControllerMock.Object, _messageBusMock.Bus, _messageBusMock.SerializerMock.Object);
+            _subject = new KafkaPartitionConsumerForResponses(_messageBusMock.BusSettings.RequestResponse, _topicPartition, _commitControllerMock.Object, _messageBusMock.Bus, _messageBusMock.SerializerMock.Object)
+            {
+                CheckpointTrigger = _checkpointTrigger.Object
+            };
         }
 
         [Fact]
-        public void WhenNewInstanceThenTopicPartitionSet()
+        public void When_NewInstance_Then_TopicPartitionSet()
         {
             _subject.TopicPartition.Should().Be(_topicPartition);
         }
 
         [Fact]
-        public void WhenOnPartitionEndReachedThenShouldCommit()
+        public void When_OnPartitionEndReached_Then_ShouldCommit()
         {
             // arrange
             var partition = new TopicPartitionOffset(_topicPartition, new Offset(10));
@@ -61,19 +64,19 @@
         }
 
         [Fact]
-        public void WhenOnPartitionRevokedThenShouldResetTrigger()
+        public void When_OnPartitionAssigned_Then_ShouldResetTrigger()
         {
             // arrange
 
             // act
-            _subject.OnPartitionRevoked();
+            _subject.OnPartitionAssigned(_topicPartition);
 
             // assert
             _checkpointTrigger.Verify(x => x.Reset(), Times.Once);
         }
 
         [Fact]
-        public async Task GivenSuccessMessageWhenOnMessageThenOnResponseArrived()
+        public async Task When_OnMessage_Given_SuccessMessage_ThenOnResponseArrived()
         {
             // arrange
             var message = GetSomeMessage();
@@ -86,7 +89,7 @@
         }
 
         [Fact]
-        public async Task GivenMessageErrorsWhenOnMessageThenShouldCallHook()
+        public async Task When_OnMessage_Given_MessageErrors_Then_ShouldCallHook()
         {
             // arrange
             var message = GetSomeMessage();
@@ -104,7 +107,7 @@
         }
 
         [Fact]
-        public async Task GivenCheckpointReturnTrueWhenOnMessageThenShouldCommit()
+        public async Task When_OnMessage_Given_CheckpointReturnTrue_Then_ShouldCommit()
         {
             // arrange
             _checkpointTrigger.Setup(x => x.Increment()).Returns(true);
@@ -118,7 +121,7 @@
         }
 
         [Fact]
-        public async Task GivenWhenCheckpointReturnFalseWhenOnMessageThenShouldNotCommit()
+        public async Task When_OnMessage_Given_WhenCheckpointReturnFalse_Then_ShouldNotCommit()
         {
             // arrange
             _checkpointTrigger.Setup(x => x.Increment()).Returns(false);

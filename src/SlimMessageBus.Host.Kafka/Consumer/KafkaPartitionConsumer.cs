@@ -16,7 +16,8 @@
         private readonly AbstractConsumerSettings consumerSettings;
         private readonly IKafkaCommitController commitController;
         private readonly IMessageProcessor<ConsumeResult> messageProcessor;
-        private readonly ICheckpointTrigger checkpointTrigger;
+
+        public ICheckpointTrigger CheckpointTrigger { get; set; }
 
         private TopicPartitionOffset lastOffset;
         private TopicPartitionOffset lastCheckpointOffset;
@@ -33,8 +34,9 @@
             this.consumerSettings = consumerSettings;
             this.commitController = commitController;
             this.messageProcessor = messageProcessor;
+
             // ToDo: Add support for Kafka driven automatic commit
-            this.checkpointTrigger = new CheckpointTrigger(consumerSettings);
+            this.CheckpointTrigger = new CheckpointTrigger(consumerSettings);
         }
 
         #region IDisposable
@@ -61,10 +63,10 @@
 
         public void OnPartitionAssigned([NotNull] TopicPartition partition)
         {
-            if (checkpointTrigger != null)
-            {
-                checkpointTrigger.Reset();
-            }
+            lastCheckpointOffset = null;
+            lastOffset = null;
+
+            CheckpointTrigger?.Reset();
         }
 
         public async Task OnMessage([NotNull] ConsumeResult message)
@@ -73,6 +75,7 @@
             {
                 lastOffset = message.TopicPartitionOffset;
 
+                // ToDo: Pass consumerInvoker
                 var lastException = await messageProcessor.ProcessMessage(message, consumerInvoker: null).ConfigureAwait(false);
                 if (lastException != null)
                 {
@@ -80,10 +83,8 @@
                     // The OnMessageFaulted was called at this point by the MessageProcessor.
                 }
 
-                if (checkpointTrigger != null && checkpointTrigger.Increment())
+                if (CheckpointTrigger != null && CheckpointTrigger.Increment())
                 {
-                    checkpointTrigger.Reset();
-
                     Commit(message.TopicPartitionOffset);
                 }
             }
@@ -96,30 +97,25 @@
 
         public void OnPartitionEndReached(TopicPartitionOffset offset)
         {
-            if (checkpointTrigger != null)
+            if (CheckpointTrigger != null)
             {
-                if (offset != null && (lastCheckpointOffset == null || offset.Offset > lastCheckpointOffset.Offset))
+                if (offset != null)
                 {
                     Commit(offset);
                 }
-                checkpointTrigger.Reset();
             }
         }
 
         public void OnPartitionRevoked()
         {
-            if (checkpointTrigger != null)
+            if (CheckpointTrigger != null)
             {
-                OnPartitionEndReached(lastOffset);
-
-                lastCheckpointOffset = null;
-                lastOffset = null;
             }
         }
 
         public void OnClose()
         {
-            if (checkpointTrigger != null)
+            if (CheckpointTrigger != null)
             {
                 Commit(lastOffset);
             }
@@ -129,10 +125,15 @@
 
         public void Commit(TopicPartitionOffset offset)
         {
-            logger.LogDebug("Group [{Group}]: Will commit at Topic: {Topic}, Partition: {Partition}, Offset: {Offset}", consumerSettings.GetGroup(), offset.Topic, offset.Partition, offset.Offset);
+            if (lastCheckpointOffset == null || offset.Offset > lastCheckpointOffset.Offset)
+            {
+                logger.LogDebug("Group [{Group}]: Commit at Offset: {Offset}, Partition: {Partition}, Topic: {Topic}", consumerSettings.GetGroup(), offset.Offset, offset.Partition, offset.Topic);
 
-            lastCheckpointOffset = offset;
-            commitController.Commit(offset);
+                lastCheckpointOffset = offset;
+                commitController.Commit(offset);
+
+                CheckpointTrigger?.Reset();
+            }
         }
     }
 }

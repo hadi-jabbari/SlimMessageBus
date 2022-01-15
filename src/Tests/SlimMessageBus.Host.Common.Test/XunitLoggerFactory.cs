@@ -1,4 +1,4 @@
-﻿namespace SlimMessageBus.Host.AzureEventHub.Test
+﻿namespace SlimMessageBus.Host.Common.Test
 {
     using Microsoft.Extensions.Logging;
     using Xunit.Abstractions;

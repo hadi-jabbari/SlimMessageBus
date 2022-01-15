@@ -14,6 +14,7 @@ namespace SlimMessageBus.Host.AzureEventHub.Test
     using SlimMessageBus.Host.DependencyResolver;
     using Microsoft.Extensions.Logging;
     using Xunit.Abstractions;
+    using SlimMessageBus.Host.Common.Test;
 
     [Trait("Category", "Integration")]
     public class EventHubMessageBusIt : IDisposable
@@ -125,7 +126,7 @@ namespace SlimMessageBus.Host.AzureEventHub.Test
         }
 
         [Fact]
-        public async Task BasicReqRespAsync()
+        public async Task BasicReqResp()
         {
             // arrange
 

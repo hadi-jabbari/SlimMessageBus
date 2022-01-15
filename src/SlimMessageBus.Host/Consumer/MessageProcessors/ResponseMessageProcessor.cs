@@ -53,8 +53,7 @@ namespace SlimMessageBus.Host
                     requestResponseSettings.OnResponseMessageFault(requestResponseSettings, message, e);
                 }
             }
-            return null;
-
+            return Task.FromResult<Exception>(null);
         }
 
         #region IDisposable
