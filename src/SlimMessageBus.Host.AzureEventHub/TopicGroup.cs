@@ -8,7 +8,7 @@
             Group = group;
         }
 
-        public string Topic { get; set; }
-        public string Group { get; set; }
+        public string Topic { get; }
+        public string Group { get; }
     }
 }
