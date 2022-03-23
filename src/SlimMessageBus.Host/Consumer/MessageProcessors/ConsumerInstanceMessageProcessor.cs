@@ -5,6 +5,7 @@
     using System.Collections.ObjectModel;
     using System.Threading.Tasks;
     using Microsoft.Extensions.Logging;
+    using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.Config;
 
     /// <summary>
@@ -22,6 +23,8 @@
 
         private readonly bool consumerWithContext;
         private readonly Action<TMessage, ConsumerContext> consumerContextInitializer;
+
+        private readonly GenericInterfaceTypeCache consumerInterceptorTypeCache = new(typeof(IConsumerInterceptor<>), nameof(IConsumerInterceptor<object>.OnHandle));
 
         public ConsumerInstanceMessageProcessor(ConsumerSettings consumerSettings, MessageBusBase messageBus, Func<TMessage, MessageWithHeaders> messageProvider, Action<TMessage, ConsumerContext> consumerContextInitializer = null)
         {
@@ -56,25 +59,31 @@
             try
             {
                 var message = DeserializeMessage(msg, out var messageHeaders, out var requestId, out var expires, consumerInvoker);
-
-                // Verify if the request/message is already expired
-                if (expires != null)
-                {
-                    var currentTime = messageBus.CurrentTime;
-                    if (currentTime > expires.Value)
-                    {
-                        OnMessageExpired(expires, message, currentTime, msg);
-
-                        // Do not process the expired message
-                        return null;
-                    }
-                }
+                var messageType = message.GetType();
 
                 object response = null;
                 string responseError = null;
 
                 using (var messageScope = messageBus.GetMessageScope(consumerSettings, message))
                 {
+                    var consumerInterceptorType = consumerInterceptorTypeCache.Get(messageType);
+                    var consumerInterceptors = consumerInterceptorTypeCache.ResolveAll(messageScope, messageType);
+
+                    // Verify if the request/message is already expired
+                    if (expires != null)
+                    {
+                        var currentTime = messageBus.CurrentTime;
+                        if (currentTime > expires.Value)
+                        {
+                            // ToDo: Call interceptor
+                            OnMessageExpired(expires, message, currentTime, msg);
+
+                            // Do not process the expired message
+                            return null;
+                        }
+                    }
+
+                    // ToDo: Call interceptor
                     OnMessageArrived(message, msg);
 
                     var consumerType = consumerInvoker?.ConsumerType ?? consumerSettings.ConsumerType;
@@ -83,6 +92,10 @@
                     try
                     {
                         response = await ExecuteConsumer(msg, message, messageHeaders, consumerInstance, consumerInvoker).ConfigureAwait(false);
+                        
+                        //foreach (var consumerInterceptor in consumerInterceptors)
+                        //{
+                        //}
                     }
                     catch (Exception e)
                     {
@@ -91,14 +104,15 @@
                     }
                     finally
                     {
-                        OnMessageFinished(message, msg);
-
                         if (consumerSettings.IsDisposeConsumerEnabled && consumerInstance is IDisposable consumerInstanceDisposable)
                         {
                             logger.LogDebug("Disposing consumer instance {Consumer} of type {ConsumerType}", consumerInstance, consumerType);
                             consumerInstanceDisposable.DisposeSilently("ConsumerInstance", logger);
                         }
                     }
+
+                    // ToDo: Call interceptor
+                    OnMessageFinished(message, msg);
                 }
 
                 if (response != null || responseError != null)
@@ -224,6 +238,7 @@
             headers = messageWithHeaders.Headers;
 
             logger.LogDebug("Deserializing message...");
+            // ToDo: Take message type from header
             var messageType = invoker?.MessageType ?? consumerSettings.MessageType;
             var message = messageBus.Serializer.Deserialize(messageType, messageWithHeaders.Payload);
 
