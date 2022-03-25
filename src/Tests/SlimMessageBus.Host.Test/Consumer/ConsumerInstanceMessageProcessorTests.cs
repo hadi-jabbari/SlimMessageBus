@@ -162,8 +162,6 @@
                 .Setup(x => x.OnHandle(message, It.IsAny<CancellationToken>(), It.IsAny<Func<Task>>(), _busMock.Bus, topic, It.IsAny<IReadOnlyDictionary<string, object>>(), It.IsAny<object>()))
                 .Callback((SomeMessage message, CancellationToken token, Func<Task> next, IMessageBus bus, string path, IReadOnlyDictionary<string, object> headers, object consumer) => next());
 
-            var derivedMessageConsumerInterceptor = new Mock<IConsumerInterceptor<SomeDerivedMessage>>();
-
             _busMock.DependencyResolverMock.Setup(x => x.Resolve(typeof(IEnumerable<IConsumerInterceptor<SomeMessage>>))).Returns(new[] { messageConsumerInterceptor.Object });
 
             var consumerSettings = new ConsumerBuilder<SomeMessage>(_busMock.Bus.Settings).Topic(topic).WithConsumer<IConsumer<SomeMessage>>().ConsumerSettings;

@@ -9,11 +9,11 @@
     using SlimMessageBus.Host.Config;
     using Xunit;
 
-    public class ConsumerInstancePoolMessageProcessorTest
+    public class ConsumerInstancePoolMessageProcessorTests
     {
         private readonly MessageBusMock _busMock;
 
-        public ConsumerInstancePoolMessageProcessorTest()
+        public ConsumerInstancePoolMessageProcessorTests()
         {
             _busMock = new MessageBusMock();
         }
