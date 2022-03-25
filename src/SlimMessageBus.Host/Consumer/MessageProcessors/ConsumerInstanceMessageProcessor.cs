@@ -3,6 +3,8 @@
     using System;
     using System.Collections.Generic;
     using System.Collections.ObjectModel;
+    using System.Linq;
+    using System.Threading;
     using System.Threading.Tasks;
     using Microsoft.Extensions.Logging;
     using SlimMessageBus.Host.Collections;
@@ -86,16 +88,33 @@
                     // ToDo: Call interceptor
                     OnMessageArrived(message, msg);
 
+                    // ToDo: Introduce CTs
+                    var ct = new CancellationToken();
+
                     var consumerType = consumerInvoker?.ConsumerType ?? consumerSettings.ConsumerType;
                     var consumerInstance = messageScope.Resolve(consumerType)
                         ?? throw new ConfigurationMessageBusException($"Could not resolve consumer/handler type {consumerType} from the DI container. Please check that the configured type {consumerType} is registered within the DI container.");
                     try
                     {
-                        response = await ExecuteConsumer(msg, message, messageHeaders, consumerInstance, consumerInvoker).ConfigureAwait(false);
-                        
-                        //foreach (var consumerInterceptor in consumerInterceptors)
-                        //{
-                        //}
+                        if (consumerInterceptors.Any())
+                        {
+                            // call with interceptors
+
+                            var next = () => ExecuteConsumer(msg, message, messageHeaders, consumerInstance, consumerInvoker);
+
+                            foreach (var consumerInterceptor in consumerInterceptors)
+                            {
+                                var interceptorParams = new object[] { message, ct, next, messageBus, consumerSettings.Path, messageHeaders, consumerInstance };
+                                next = () => (Task<object>)consumerInterceptorType.Method.Invoke(consumerInterceptor, interceptorParams);
+                            }
+
+                            response = await next();
+                        }
+                        else
+                        {
+                            // call without interceptors
+                            response = await ExecuteConsumer(msg, message, messageHeaders, consumerInstance, consumerInvoker).ConfigureAwait(false);
+                        }
                     }
                     catch (Exception e)
                     {

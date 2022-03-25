@@ -2,6 +2,7 @@ namespace SlimMessageBus.Host.Test
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using Moq;
     using SlimMessageBus.Host.Config;
     using SlimMessageBus.Host.DependencyResolver;
@@ -30,6 +31,9 @@ namespace SlimMessageBus.Host.Test
             {
                 mock.Setup(x => x.Resolve(typeof(IConsumer<SomeMessage>))).Returns(ConsumerMock.Object);
                 mock.Setup(x => x.Resolve(typeof(IRequestHandler<SomeRequest, SomeResponse>))).Returns(HandlerMock.Object);
+
+                mock.Setup(x => x.Resolve(It.Is<Type>(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IEnumerable<>) && t.GetGenericArguments().Length == 1 && t.GetGenericArguments()[0].IsGenericType && t.GetGenericArguments()[0].GetGenericTypeDefinition() == typeof(IConsumerInterceptor<>))))
+                    .Returns(Enumerable.Empty<object>());
             }
 
             DependencyResolverMock = new Mock<IDependencyResolver>();
