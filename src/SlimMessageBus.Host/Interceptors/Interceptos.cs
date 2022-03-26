@@ -9,7 +9,7 @@
     {
     }
 
-    public interface IPublishInterceptor<in TMessage>
+    public interface IPublisherInterceptor<in TMessage>
     {
         Task OnHandle(TMessage message, CancellationToken cancellationToken, Func<Task> next, IMessageBus bus, string path, IDictionary<string, object> headers);
     }

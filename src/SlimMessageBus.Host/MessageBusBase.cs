@@ -16,7 +16,6 @@ namespace SlimMessageBus.Host
     {
         private readonly ILogger _logger;
         private CancellationTokenSource _cancellationTokenSource = new();
-        private readonly SafeDictionaryWrapper<Type, Type> _messageTypeToBaseType = new();
 
         public ILoggerFactory LoggerFactory { get; }
 
@@ -24,7 +23,9 @@ namespace SlimMessageBus.Host
 
         public virtual IMessageSerializer Serializer => Settings.Serializer;
 
+        public IGenericInterfaceTypeCacheLookup GenericInterfaceTypeCacheLookup { get; } = new BusGenericInterfaceTypeCacheLookup();
         protected ProducerByMessageTypeCache<ProducerSettings> ProducerSettingsByMessageType { get; private set; }
+
         protected IPendingRequestStore PendingRequestStore { get; set; }
         protected PendingRequestManager PendingRequestManager { get; set; }
 

@@ -26,7 +26,10 @@
         private readonly bool consumerWithContext;
         private readonly Action<TMessage, ConsumerContext> consumerContextInitializer;
 
-        private readonly GenericInterfaceTypeCache consumerInterceptorTypeCache = new(typeof(IConsumerInterceptor<>), nameof(IConsumerInterceptor<object>.OnHandle));
+        private readonly GenericInterfaceTypeCache consumerInterceptorTypeCache;
+        private readonly GenericInterfaceTypeCache handlerInterceptorTypeCache;
+
+        public AbstractConsumerSettings ConsumerSettings => consumerSettings;
 
         public ConsumerInstanceMessageProcessor(ConsumerSettings consumerSettings, MessageBusBase messageBus, Func<TMessage, MessageWithHeaders> messageProvider, Action<TMessage, ConsumerContext> consumerContextInitializer = null)
         {
@@ -39,6 +42,9 @@
 
             this.consumerContextInitializer = consumerContextInitializer;
             consumerWithContext = typeof(IConsumerWithContext).IsAssignableFrom(consumerSettings.ConsumerType);
+
+            consumerInterceptorTypeCache = messageBus.GenericInterfaceTypeCacheLookup[typeof(IConsumerInterceptor<>)];
+            handlerInterceptorTypeCache = messageBus.GenericInterfaceTypeCacheLookup[typeof(IRequestHandlerInterceptor<,>)];
         }
 
         #region IAsyncDisposable
@@ -52,8 +58,6 @@
         protected virtual ValueTask DisposeAsyncCore() => new();
 
         #endregion
-
-        public AbstractConsumerSettings ConsumerSettings => consumerSettings;
 
         public virtual async Task<Exception> ProcessMessage(TMessage msg, IMessageTypeConsumerInvokerSettings consumerInvoker)
         {
@@ -96,7 +100,7 @@
                         ?? throw new ConfigurationMessageBusException($"Could not resolve consumer/handler type {consumerType} from the DI container. Please check that the configured type {consumerType} is registered within the DI container.");
                     try
                     {
-                        if (consumerInterceptors.Any())
+                        if (consumerInterceptors != null && consumerInterceptors.Any())
                         {
                             // call with interceptors
 

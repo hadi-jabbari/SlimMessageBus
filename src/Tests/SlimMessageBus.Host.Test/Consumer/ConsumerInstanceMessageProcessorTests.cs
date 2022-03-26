@@ -27,7 +27,8 @@
         {
             // arrange
             var onMessageExpiredMock = new Mock<Action<IMessageBus, AbstractConsumerSettings, object, object>>();
-            var consumerSettings = new HandlerBuilder<SomeRequest, SomeResponse>(new MessageBusSettings()).Topic(null).WithHandler<IRequestHandler<SomeRequest, SomeResponse>>().Instances(1).ConsumerSettings;
+
+            var consumerSettings = new HandlerBuilder<SomeRequest, SomeResponse>(new MessageBusSettings()).Topic(null).WithHandler<IRequestHandler<SomeRequest, SomeResponse>>().ConsumerSettings;
             consumerSettings.OnMessageExpired = onMessageExpiredMock.Object;
 
             MessageWithHeaders MessageProvider(SomeRequest request)
@@ -40,7 +41,6 @@
             var p = new ConsumerInstanceMessageProcessor<SomeRequest>(consumerSettings, _busMock.Bus, MessageProvider);
 
             var request = new SomeRequest();
-
             _busMock.SerializerMock.Setup(x => x.Deserialize(typeof(SomeRequest), It.IsAny<byte[]>())).Returns(request);
 
             // act

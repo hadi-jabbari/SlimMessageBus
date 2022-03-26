@@ -145,7 +145,8 @@ namespace SlimMessageBus.Host.AzureServiceBus.Test
                         Interlocked.Increment(ref consumersCreated);
                         return pingConsumer;
                     }
-
+                    // for interceptors
+                    if (f.IsGenericType && f.GetGenericTypeDefinition() == typeof(IEnumerable<>)) return Enumerable.Empty<object>();
                     throw new InvalidOperationException();
                 }));
 
@@ -255,10 +256,15 @@ namespace SlimMessageBus.Host.AzureServiceBus.Test
             MessageBusBuilder
                 .WithDependencyResolver(new LookupDependencyResolver(f =>
                 {
-                    if (f != typeof(EchoRequestHandler)) throw new InvalidOperationException();
-                    var consumer = new EchoRequestHandler();
-                    consumersCreated.Add(consumer);
-                    return consumer;
+                    if (f == typeof(EchoRequestHandler))
+                    {
+                        var consumer = new EchoRequestHandler();
+                        consumersCreated.Add(consumer);
+                        return consumer;
+                    }
+                    // for interceptors
+                    if (f.IsGenericType && f.GetGenericTypeDefinition() == typeof(IEnumerable<>)) return Enumerable.Empty<object>();
+                    throw new InvalidOperationException();
                 }));
 
             var messageBus = MessageBus.Value;

@@ -15,10 +15,10 @@ namespace SlimMessageBus.Host.Hybrid.Test
     public class HybridMessageBusTest
     {
         private readonly Lazy<HybridMessageBus> _subject;
-        private readonly MessageBusSettings _settings = new MessageBusSettings();
-        private readonly HybridMessageBusSettings _providerSettings = new HybridMessageBusSettings();
-        private readonly Mock<IDependencyResolver> _dependencyResolverMock = new Mock<IDependencyResolver>();
-        private readonly Mock<IMessageSerializer> _messageSerializerMock = new Mock<IMessageSerializer>();
+        private readonly MessageBusSettings _settings = new();
+        private readonly HybridMessageBusSettings _providerSettings = new();
+        private readonly Mock<IDependencyResolver> _dependencyResolverMock = new();
+        private readonly Mock<IMessageSerializer> _messageSerializerMock = new();
 
         private Mock<MessageBusBase> _bus1Mock;
         private Mock<MessageBusBase> _bus2Mock;
