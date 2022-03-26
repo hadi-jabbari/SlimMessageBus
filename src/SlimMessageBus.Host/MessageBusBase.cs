@@ -16,6 +16,7 @@ namespace SlimMessageBus.Host
     {
         private readonly ILogger _logger;
         private CancellationTokenSource _cancellationTokenSource = new();
+        private readonly GenericInterfaceTypeCache _publishInterceptorTypeCache;
 
         public ILoggerFactory LoggerFactory { get; }
 
@@ -44,6 +45,8 @@ namespace SlimMessageBus.Host
                 ?? NullLoggerFactory.Instance;
 
             _logger = LoggerFactory.CreateLogger<MessageBusBase>();
+
+            _publishInterceptorTypeCache = GenericInterfaceTypeCacheLookup[typeof(IPublishInterceptor<>)];
         }
 
         /// <summary>
@@ -292,13 +295,6 @@ namespace SlimMessageBus.Host
             return producerSettings;
         }
 
-        protected virtual string GetDefaultPath(Type messageType)
-        {
-            // when topic was not provided, lookup default topic from configuration
-            var producerSettings = GetProducerSettings(messageType);
-            return GetDefaultPath(messageType, producerSettings);
-        }
-
         protected virtual string GetDefaultPath(Type messageType, ProducerSettings producerSettings)
         {
             if (producerSettings == null) throw new ArgumentNullException(nameof(producerSettings));
@@ -324,12 +320,38 @@ namespace SlimMessageBus.Host
                 path = GetDefaultPath(producerSettings.MessageType, producerSettings);
             }
 
-            OnProducedHook(message, path, producerSettings);
-
-            var payload = Serializer.Serialize(producerSettings.MessageType, message);
+            var actualMessageType = message.GetType();
 
             var messageHeaders = CreateHeaders();
             AddMessageHeaders(messageHeaders, headers, message, producerSettings);
+
+            // ToDo: Enlist in the current scope
+            var publishInterceptors = _publishInterceptorTypeCache.ResolveAll(Settings.DependencyResolver, actualMessageType);
+            if (publishInterceptors != null && publishInterceptors.Any())
+            {
+                var publishInterceptorType = _publishInterceptorTypeCache.Get(actualMessageType);
+
+                // ToDo: Introduce CTs
+                var ct = new CancellationToken();
+
+                var next = () => PublishInternal(message, path, messageHeaders, producerSettings);
+                foreach (var publishInterceptor in publishInterceptors)
+                {                    
+                    // The params follow IPublishInterceptor<>.OnHandle parameters
+                    var interceptorParams = new object[] { message, ct, next, this, path, headers };
+                    next = () => (Task)publishInterceptorType.Method.Invoke(publishInterceptor, interceptorParams);
+                }
+                return next();
+            }
+
+            return PublishInternal(message, path, messageHeaders, producerSettings);
+        }
+
+        protected virtual Task PublishInternal(object message, string path, IDictionary<string, object> messageHeaders, ProducerSettings producerSettings)
+        {
+            OnProducedHook(message, path, producerSettings);
+
+            var payload = Serializer.Serialize(producerSettings.MessageType, message);
 
             _logger.LogDebug("Producing message {Message} of type {MessageType} to path {Path}", message, producerSettings.MessageType, path);
             return ProduceToTransport(producerSettings.MessageType, message, path, payload, messageHeaders);
@@ -351,7 +373,6 @@ namespace SlimMessageBus.Host
             producerSettings.HeaderModifier?.Invoke(messageHeaders, message);
             // Call header hook
             Settings.HeaderModifier?.Invoke(messageHeaders, message);
-
         }
 
         private void AddMessageTypeHeader(object message, IDictionary<string, object> headers)

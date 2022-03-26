@@ -24,10 +24,10 @@
     {
         public BusGenericInterfaceTypeCacheLookup()
         {
-            Add(typeof(IPublisherInterceptor<>), nameof(IPublisherInterceptor<object>.OnHandle));
+            Add(typeof(IPublishInterceptor<>), nameof(IPublishInterceptor<object>.OnHandle));
             Add(typeof(IConsumerInterceptor<>), nameof(IConsumerInterceptor<object>.OnHandle));
 
-            Add(typeof(IRequestInterceptor<,>), nameof(IRequestInterceptor<object, object>.OnHandle));
+            Add(typeof(ISendInterceptor<,>), nameof(ISendInterceptor<object, object>.OnHandle));
             Add(typeof(IRequestHandlerInterceptor<,>), nameof(IRequestHandlerInterceptor<object, object>.OnHandle));
 
             Add(typeof(IConsumer<>), nameof(IConsumer<object>.OnHandle));

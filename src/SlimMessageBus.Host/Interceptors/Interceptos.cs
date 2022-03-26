@@ -5,16 +5,16 @@
     using System.Threading;
     using System.Threading.Tasks;
 
-    public interface IProducerInterceptor
+    public interface IProduceInterceptor
     {
     }
 
-    public interface IPublisherInterceptor<in TMessage>
+    public interface IPublishInterceptor<in TMessage>
     {
         Task OnHandle(TMessage message, CancellationToken cancellationToken, Func<Task> next, IMessageBus bus, string path, IDictionary<string, object> headers);
     }
 
-    public interface IRequestInterceptor<in TRequest, TResponse>
+    public interface ISendInterceptor<in TRequest, TResponse>
     {
         Task<TResponse> OnHandle(TRequest request, CancellationToken cancellationToken, Func<Task<TResponse>> next, IMessageBus bus, string path, IDictionary<string, object> headers);
     }

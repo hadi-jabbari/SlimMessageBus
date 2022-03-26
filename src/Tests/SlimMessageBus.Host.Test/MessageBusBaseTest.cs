@@ -37,6 +37,7 @@
 
         private const int TimeoutForA10 = 10;
         private const int TimeoutDefault20 = 20;
+        private readonly Mock<IDependencyResolver> _dependencyResolverMock;
 
         public IList<(Type messageType, string name, object message)> _producedMessages;
 
@@ -46,6 +47,8 @@
             _timeNow = _timeZero;
 
             _producedMessages = new List<(Type messageType, string name, object message)>();
+
+            _dependencyResolverMock = new Mock<IDependencyResolver>();
 
             BusBuilder = MessageBusBuilder.Create()
                 .Produce<RequestA>(x =>
@@ -62,7 +65,7 @@
                     x.ReplyToTopic("app01-responses");
                     x.DefaultTimeout(TimeSpan.FromSeconds(TimeoutDefault20));
                 })
-                .WithDependencyResolver(new LookupDependencyResolver(t => null))
+                .WithDependencyResolver(_dependencyResolverMock.Object)
                 .WithSerializer(new JsonMessageSerializer())
                 .WithProvider(s =>
                 {
@@ -495,6 +498,45 @@
 
             onMessageProducedMock.Verify(
                 x => x(Bus, It.IsAny<ProducerSettings>(), r, someRequestTopic), Times.Exactly(2)); // callback twice - at the producer and bus level
+        }
+
+        [Fact]
+        public async Task When_Publish_Given_PublishInterceptorRegisteredInDI_Then_PublishInterceptorInvoked()
+        {
+            // arrange
+            var someMessageTopic = "some-messages";
+
+            BusBuilder
+                .Produce<SomeMessage>(x =>
+                {
+                    x.DefaultTopic(someMessageTopic);
+                });
+
+            var m = new SomeDerivedMessage();
+
+            var publishInterceptorMock = new Mock<IPublishInterceptor<SomeDerivedMessage>>();
+            publishInterceptorMock.Setup(x => x.OnHandle(m, It.IsAny<CancellationToken>(), It.IsAny<Func<Task>>(), Bus, someMessageTopic, It.IsAny<IDictionary<string, object>>()))
+                .Callback(async (SomeDerivedMessage m, CancellationToken token, Func<Task> next, IMessageBus bus, string topic, IDictionary<string, object> headers) =>
+                {
+                    await next();
+                });
+
+            _dependencyResolverMock.Setup(x => x.Resolve(typeof(IEnumerable<IPublishInterceptor<SomeDerivedMessage>>))).Returns(new[] { publishInterceptorMock.Object });
+
+
+            // act
+            await Bus.Publish(m);
+
+            // assert
+            _producedMessages.Count.Should().Be(1);
+            _producedMessages[0].messageType.Should().Be(typeof(SomeMessage));
+            _producedMessages[0].message.Should().Be(m);
+            _producedMessages[0].name.Should().Be(someMessageTopic);
+
+            _dependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IPublishInterceptor<SomeDerivedMessage>>)), Times.Once);
+
+            publishInterceptorMock.Verify(x => x.OnHandle(m, It.IsAny<CancellationToken>(), It.IsAny<Func<Task>>(), Bus, someMessageTopic, It.IsAny<IDictionary<string, object>>()), Times.Once);
+            publishInterceptorMock.VerifyNoOtherCalls();
         }
     }
 

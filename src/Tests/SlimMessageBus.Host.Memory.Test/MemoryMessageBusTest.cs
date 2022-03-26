@@ -1,6 +1,7 @@
 namespace SlimMessageBus.Host.Memory.Test
 {
     using System;
+    using System.Collections.Generic;
     using System.Text;
     using System.Threading.Tasks;
     using FluentAssertions;
@@ -153,6 +154,7 @@ namespace SlimMessageBus.Host.Memory.Test
             // assert
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(ILoggerFactory)), Times.Once);
             _dependencyResolverMock.Verify(x => x.CreateScope(), Times.Once);
+            _dependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IPublishInterceptor<SomeMessageA>>)), Times.Once);
             _dependencyResolverMock.VerifyNoOtherCalls();
 
             scope.Verify(x => x.Resolve(typeof(SomeMessageAConsumer)), Times.Once);
@@ -193,6 +195,7 @@ namespace SlimMessageBus.Host.Memory.Test
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(ILoggerFactory)), Times.Once);
             _dependencyResolverMock.Verify(x => x.CreateScope(), Times.Never);
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(SomeMessageAConsumer)), Times.Once);
+            _dependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IPublishInterceptor<SomeMessageA>>)), Times.Once);
             _dependencyResolverMock.VerifyNoOtherCalls();
 
             consumerMock.Verify(x => x.OnHandle(m, topic), Times.Once);
@@ -241,6 +244,7 @@ namespace SlimMessageBus.Host.Memory.Test
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(ILoggerFactory)), Times.Once);
             _dependencyResolverMock.Verify(x => x.CreateScope(), Times.Never);
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(SomeMessageAConsumer)), Times.Never);
+            _dependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IPublishInterceptor<SomeMessageA>>)), Times.Once);
             _dependencyResolverMock.VerifyNoOtherCalls();
 
             currentScopeDependencyResolverMock.Verify(x => x.CreateScope(), Times.Never);
