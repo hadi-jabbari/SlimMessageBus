@@ -89,7 +89,6 @@
                         }
                     }
 
-                    // ToDo: Call interceptor
                     OnMessageArrived(message, msg);
 
                     // ToDo: Introduce CTs
@@ -134,7 +133,6 @@
                         }
                     }
 
-                    // ToDo: Call interceptor
                     OnMessageFinished(message, msg);
                 }
 

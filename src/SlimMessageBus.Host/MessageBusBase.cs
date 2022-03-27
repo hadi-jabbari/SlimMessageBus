@@ -10,13 +10,15 @@ namespace SlimMessageBus.Host
     using Microsoft.Extensions.Logging.Abstractions;
     using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.Config;
+    using SlimMessageBus.Host.DependencyResolver;
     using SlimMessageBus.Host.Serialization;
 
-    public abstract class MessageBusBase : IMessageBus, IConsumerControl, IAsyncDisposable
+    public abstract class MessageBusBase : IMasterMessageBus, IAsyncDisposable
     {
         private readonly ILogger _logger;
         private CancellationTokenSource _cancellationTokenSource = new();
         private readonly GenericInterfaceTypeCache _publishInterceptorTypeCache;
+        private readonly IDependencyResolver _scopedDependencyResolver;
 
         public ILoggerFactory LoggerFactory { get; }
 
@@ -47,6 +49,7 @@ namespace SlimMessageBus.Host
             _logger = LoggerFactory.CreateLogger<MessageBusBase>();
 
             _publishInterceptorTypeCache = GenericInterfaceTypeCacheLookup[typeof(IPublishInterceptor<>)];
+            _scopedDependencyResolver = new MessageScopeAwareDependencyResolverDecorator(settings.DependencyResolver);
         }
 
         /// <summary>
@@ -308,7 +311,7 @@ namespace SlimMessageBus.Host
 
         public abstract Task ProduceToTransport(Type messageType, object message, string path, byte[] messagePayload, IDictionary<string, object> messageHeaders = null);
 
-        public virtual Task Publish(Type messageType, object message, string path = null, IDictionary<string, object> headers = null)
+        public virtual Task Publish(Type messageType, object message, string path = null, IDictionary<string, object> headers = null, IDependencyResolver currentDependencyResolver = null)
         {
             if (message == null) throw new ArgumentNullException(nameof(message));
             AssertActive();
@@ -325,8 +328,7 @@ namespace SlimMessageBus.Host
             var messageHeaders = CreateHeaders();
             AddMessageHeaders(messageHeaders, headers, message, producerSettings);
 
-            // ToDo: Enlist in the current scope
-            var publishInterceptors = _publishInterceptorTypeCache.ResolveAll(Settings.DependencyResolver, actualMessageType);
+            var publishInterceptors = _publishInterceptorTypeCache.ResolveAll(currentDependencyResolver ?? _scopedDependencyResolver, actualMessageType);
             if (publishInterceptors != null && publishInterceptors.Any())
             {
                 var publishInterceptorType = _publishInterceptorTypeCache.Get(actualMessageType);
@@ -336,7 +338,7 @@ namespace SlimMessageBus.Host
 
                 var next = () => PublishInternal(message, path, messageHeaders, producerSettings);
                 foreach (var publishInterceptor in publishInterceptors)
-                {                    
+                {
                     // The params follow IPublishInterceptor<>.OnHandle parameters
                     var interceptorParams = new object[] { message, ct, next, this, path, headers };
                     next = () => (Task)publishInterceptorType.Method.Invoke(publishInterceptor, interceptorParams);
@@ -389,13 +391,6 @@ namespace SlimMessageBus.Host
         /// <returns></returns>
         public virtual IDictionary<string, object> CreateHeaders() => new Dictionary<string, object>(10);
 
-        #region Implementation of IPublishBus
-
-        public virtual Task Publish<TMessage>(TMessage message, string path = null, IDictionary<string, object> headers = null)
-            => Publish(typeof(TMessage), message, path, headers);
-
-        #endregion
-
         protected virtual TimeSpan GetDefaultRequestTimeout(Type requestType, ProducerSettings producerSettings)
         {
             if (producerSettings == null) throw new ArgumentNullException(nameof(producerSettings));
@@ -405,7 +400,7 @@ namespace SlimMessageBus.Host
             return timeout;
         }
 
-        protected virtual async Task<TResponseMessage> SendInternal<TResponseMessage>(object request, TimeSpan? timeout, string path, IDictionary<string, object> headers, CancellationToken cancellationToken)
+        public virtual async Task<TResponseMessage> SendInternal<TResponseMessage>(object request, TimeSpan? timeout, string path, IDictionary<string, object> headers, CancellationToken cancellationToken, IDependencyResolver currentDependencyResolver = null)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
             AssertActive();
@@ -514,25 +509,6 @@ namespace SlimMessageBus.Host
             return ProduceToTransport(consumerSettings.ResponseType, response, (string)replyTo, responsePayload, responseHeaders);
         }
 
-        #region Implementation of IRequestResponseBus
-
-        public virtual Task<TResponseMessage> Send<TResponseMessage>(IRequestMessage<TResponseMessage> request, CancellationToken cancellationToken)
-            => SendInternal<TResponseMessage>(request, timeout: null, path: null, headers: null, cancellationToken);
-
-        public Task<TResponseMessage> Send<TResponseMessage, TRequestMessage>(TRequestMessage request, CancellationToken cancellationToken)
-            => SendInternal<TResponseMessage>(request, timeout: null, path: null, headers: null, cancellationToken);
-
-        public virtual Task<TResponseMessage> Send<TResponseMessage>(IRequestMessage<TResponseMessage> request, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default)
-            => SendInternal<TResponseMessage>(request, null, path, headers, cancellationToken);
-
-        public virtual Task<TResponseMessage> Send<TResponseMessage, TRequestMessage>(TRequestMessage request, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default)
-            => SendInternal<TResponseMessage>(request, null, path, headers, cancellationToken);
-
-        public virtual Task<TResponseMessage> Send<TResponseMessage>(IRequestMessage<TResponseMessage> request, TimeSpan timeout, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default)
-            => SendInternal<TResponseMessage>(request, timeout, path, headers, cancellationToken);
-
-        #endregion
-
         /// <summary>
         /// Should be invoked by the concrete bus implementation whenever there is a message arrived on the reply to topic.
         /// </summary>
@@ -623,8 +599,39 @@ namespace SlimMessageBus.Host
 
         public virtual MessageScopeWrapper GetMessageScope(ConsumerSettings consumerSettings, object message)
         {
+            // ToDo: Move to MessageBusProxy to pick up the local scope
             var createMessageScope = IsMessageScopeEnabled(consumerSettings);
             return new MessageScopeWrapper(_logger, Settings.DependencyResolver, createMessageScope, message);
         }
+
+        #region Implementation of IMessageBus
+
+        #region Implementation of IPublishBus
+
+        public virtual Task Publish<TMessage>(TMessage message, string path = null, IDictionary<string, object> headers = null)
+            => Publish(typeof(TMessage), message, path, headers);
+
+        #endregion
+
+        #region Implementation of IRequestResponseBus
+
+        public virtual Task<TResponseMessage> Send<TResponseMessage>(IRequestMessage<TResponseMessage> request, CancellationToken cancellationToken)
+            => SendInternal<TResponseMessage>(request, timeout: null, path: null, headers: null, cancellationToken);
+
+        public Task<TResponseMessage> Send<TResponseMessage, TRequestMessage>(TRequestMessage request, CancellationToken cancellationToken)
+            => SendInternal<TResponseMessage>(request, timeout: null, path: null, headers: null, cancellationToken);
+
+        public virtual Task<TResponseMessage> Send<TResponseMessage>(IRequestMessage<TResponseMessage> request, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default)
+            => SendInternal<TResponseMessage>(request, null, path, headers, cancellationToken);
+
+        public virtual Task<TResponseMessage> Send<TResponseMessage, TRequestMessage>(TRequestMessage request, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default)
+            => SendInternal<TResponseMessage>(request, null, path, headers, cancellationToken);
+
+        public virtual Task<TResponseMessage> Send<TResponseMessage>(IRequestMessage<TResponseMessage> request, TimeSpan timeout, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default)
+            => SendInternal<TResponseMessage>(request, timeout, path, headers, cancellationToken);
+
+        #endregion
+
+        #endregion
     }
 }

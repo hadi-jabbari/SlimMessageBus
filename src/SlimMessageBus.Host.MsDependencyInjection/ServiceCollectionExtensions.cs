@@ -36,7 +36,8 @@
             {
                 services.AddMessageBusConfiguratorsFromAssembly(addConfiguratorsFromAssembly);
             }
-
+            
+            // Single master bus that holds the defined consumers and message processing pipelines
             services.AddSingleton((svp) =>
             {
                 var configurators = svp.GetServices<IMessageBusConfigurator>();
@@ -54,12 +55,17 @@
 
                 configure(mbb, svp);
 
-                return mbb.Build();
+                return (IMasterMessageBus)mbb.Build();
             });
 
-            services.AddTransient<IPublishBus>(svp => svp.GetRequiredService<IMessageBus>());
-            services.AddTransient<IRequestResponseBus>(svp => svp.GetRequiredService<IMessageBus>());
-            services.AddTransient<IConsumerControl>(svp => (IConsumerControl)svp.GetRequiredService<IMessageBus>());
+            services.AddTransient<IConsumerControl>(svp => svp.GetRequiredService<IMasterMessageBus>());
+
+            // Register scoped message buss - this is a super lightweight wrapper that just introduces the current DI scope
+            services.AddTransient(svp => new MessageBusProxy(svp.GetRequiredService<IMasterMessageBus>(), new MsDependencyInjectionDependencyResolver(svp)));
+
+            services.AddTransient<IMessageBus>(svp => svp.GetRequiredService<MessageBusProxy>());
+            services.AddTransient<IPublishBus>(svp => svp.GetRequiredService<MessageBusProxy>());
+            services.AddTransient<IRequestResponseBus>(svp => svp.GetRequiredService<MessageBusProxy>());
 
             return services;
         }

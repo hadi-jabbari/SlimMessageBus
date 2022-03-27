@@ -133,7 +133,6 @@
             var consumerInstance = messageScope.Resolve(consumerSettings.ConsumerType)
                 ?? throw new ConfigurationMessageBusException($"The dependency resolver does not know how to create an instance of {consumerSettings.ConsumerType}");
 
-            Task consumerTask = null;
             try
             {
                 var messageForConsumer = !ProviderSettings.EnableMessageSerialization
@@ -141,8 +140,11 @@
                     : Serializer.Deserialize(messageType, messagePayload); // will pass a deep copy of the message
 
                 _logger.LogDebug("Executing consumer instance {Consumer} of type {ConsumerType} for message {Message}", consumerInstance, consumerSettings.ConsumerType, message);
-                consumerTask = consumerSettings.ConsumerMethod(consumerInstance, messageForConsumer, consumerSettings.Path);
+                var consumerTask = consumerSettings.ConsumerMethod(consumerInstance, messageForConsumer, consumerSettings.Path);
+
                 await consumerTask.ConfigureAwait(false);
+
+                return consumerTask;
             }
             finally
             {
@@ -152,8 +154,6 @@
                     consumerInstanceDisposable.DisposeSilently("ConsumerInstance", _logger);
                 }
             }
-
-            return consumerTask;
         }
 
         #endregion

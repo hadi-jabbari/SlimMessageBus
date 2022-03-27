@@ -8,8 +8,9 @@
     using Microsoft.Extensions.Logging.Abstractions;
     using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.Config;
+    using SlimMessageBus.Host.DependencyResolver;
 
-    public class HybridMessageBus : IMessageBus, IConsumerControl, IAsyncDisposable
+    public class HybridMessageBus : IMasterMessageBus, IAsyncDisposable
     {
         private readonly ILogger _logger;
 
@@ -119,7 +120,7 @@
 
         #endregion
 
-        protected virtual IMessageBus Route(object message, string path)
+        protected virtual MessageBusBase Route(object message, string path)
         {
             var messageType = message.GetType();
 
@@ -174,5 +175,17 @@
         }
 
         #endregion
+
+        public Task Publish(Type messageType, object message, string path = null, IDictionary<string, object> headers = null, IDependencyResolver currentDependencyResolver = null)
+        {
+            var bus = Route(message, path);
+            return bus.Publish(messageType, message, path, headers, currentDependencyResolver);
+        }
+
+        public Task<TResponseMessage> SendInternal<TResponseMessage>(object request, TimeSpan? timeout, string path, IDictionary<string, object> headers, CancellationToken cancellationToken, IDependencyResolver currentDependencyResolver = null)
+        {
+            var bus = Route(request, path);
+            return bus.SendInternal<TResponseMessage>(request, timeout, path, headers, cancellationToken, currentDependencyResolver);
+        }
     }
 }
