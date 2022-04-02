@@ -24,7 +24,7 @@
         /// <inheritdoc/>
         public virtual object Resolve(Type type)
         {
-            logger.LogDebug("Resolving type {0}", type);
+            logger.LogDebug("Resolving type {Type}", type);
             return ServiceProvider.GetService(type);
         }
 

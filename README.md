@@ -8,14 +8,13 @@ SlimMessageBus is a client façade for message brokers for .NET. It comes with i
 [![Build status](https://ci.appveyor.com/api/projects/status/6ppr19du717spq3s/branch/develop?svg=true&passingText=develop%20OK&pendingText=develop%20pending&failingText=develop%20fail)](https://ci.appveyor.com/project/zarusz/slimmessagebus/branch/develop)
 [![Build status](https://ci.appveyor.com/api/projects/status/6ppr19du717spq3s?svg=true&passingText=other%20OK&pendingText=other%20pending&failingText=other%20fail)](https://ci.appveyor.com/project/zarusz/slimmessagebus)
 
-
 - [Key elements of SlimMessageBus](#key-elements-of-slimmessagebus)
 - [Docs](#docs)
 - [Packages](#packages)
 - [Samples](#samples)
   - [Basic usage](#basic-usage)
-  - [Configuration](#configuration)
   - [Configuration with MsDependencyInjection](#configuration-with-msdependencyinjection)
+  - [Configuration (without MsDependencyInjection)](#configuration-without-msdependencyinjection)
   - [Use Case: Domain Events (in-process pub/sub messaging)](#use-case-domain-events-in-process-pubsub-messaging)
   - [Use Case: Request-response over Kafka topics](#use-case-request-response-over-kafka-topics)
 - [Features](#features)
@@ -77,8 +76,6 @@ Typically your application components (business logic, domain) only need to depe
 
 ## Samples
 
-Check out the [Samples](src/Samples/) folder for complete overview.
-
 ### Basic usage
 
 Some service (or domain layer) sends a message:
@@ -125,7 +122,49 @@ public class MessageRequestHandler : IRequestHandler<MessageRequest, MessageResp
 
 The bus will ask the chosen DI to provide the consumer instances (`SomeMessageConsumer`, `MessageRequestHandler`).
 
-### Configuration
+### Configuration with MsDependencyInjection
+
+When your service uses `Microsoft.Extensions.DependencyInjection`, the SMB can be configured in a more compact way
+(requires `SlimMessageBus.Host.MsDependencyInjection` or `SlimMessageBus.Host.AspNetCore` package):
+
+```cs
+// Startup.cs
+
+IServiceCollection services;
+
+services.AddSlimMessageBus((mbb, svp) =>
+   {
+      mbb
+         .Produce<SomeMessage>(x => x.DefaultTopic("some-topic"))
+         .Consume<SomeMessage>(x => x
+            .Topic("some-topic")
+            .WithConsumer<SomeMessageConsumer>()
+            //.KafkaGroup("some-kafka-consumer-group") //  Kafka provider specific
+            //.SubscriptionName("some-azure-sb-topic-subscription") // Azure ServiceBus provider specific
+         )
+         // ...
+         .WithSerializer(new JsonMessageSerializer())
+         .WithProviderKafka(new KafkaMessageBusSettings("localhost:9092"));
+         // Use Azure Service Bus transport provider
+         //.WithProviderServiceBus(...)
+         // Use Azure Azure Event Hub transport provider
+         //.WithProviderEventHub(...)
+         // Use Redis transport provider
+         //.WithProviderRedis(...)
+         // Use in-memory transport provider
+         //.WithProviderMemory(...)         
+   }, 
+   // Option 1 (optional)
+   addConsumersFromAssembly: new[] { Assembly.GetExecutingAssembly() }, // auto discover consumers and register into DI (see next section)
+   addConfiguratorsFromAssembly: new[] { Assembly.GetExecutingAssembly() } // auto discover modular configuration and register into DI (see next section)
+);
+
+// Option 2 (optional)
+services.AddMessageBusConsumersFromAssembly(Assembly.GetExecutingAssembly());
+services.AddMessageBusConfiguratorsFromAssembly(Assembly.GetExecutingAssembly());
+```
+
+### Configuration (without MsDependencyInjection)
 
 To configure SMB in your service:
 
@@ -165,55 +204,15 @@ IMessageBus bus = mbb.Build();
 // Register bus in your DI (as a singleton)
 ```
 
-### Configuration with MsDependencyInjection
-
-When your service uses `Microsoft.Extensions.DependencyInjection`, the SMB can be configured in a more compact way
-(requires `SlimMessageBus.Host.MsDependencyInjection` or `SlimMessageBus.Host.AspNetCore` package):
-
-```cs
-// Startup.cs
-
-IServiceCollection services;
-
-services.AddSlimMessageBus((mbb, svp) =>
-   {
-      mbb
-         .Produce<SomeMessage>(x => x.DefaultTopic("some-topic"))
-         .Consume<SomeMessage>(x => x
-            .Topic("some-topic")
-            .WithConsumer<SomeMessageConsumer>()
-            //.KafkaGroup("some-kafka-consumer-group") //  Kafka provider specific
-            //.SubscriptionName("some-azure-sb-topic-subscription") // Azure ServiceBus provider specific
-         )
-         // ...
-         .WithSerializer(new JsonMessageSerializer())
-         .WithProviderKafka(new KafkaMessageBusSettings("localhost:9092"));
-   }, 
-   // Option 1 (optional)
-   addConsumersFromAssembly: new[] { Assembly.GetExecutingAssembly() }, // auto discover consumers and register into DI (see next section)
-   addConfiguratorsFromAssembly: new[] { Assembly.GetExecutingAssembly() } // auto discover modular configuration and register into DI (see next section)
-);
-
-// Option 2 (optional)
-services.AddMessageBusConsumersFromAssembly(Assembly.GetExecutingAssembly());
-services.AddMessageBusConfiguratorsFromAssembly(Assembly.GetExecutingAssembly());
-```
-
 ### Use Case: Domain Events (in-process pub/sub messaging)
 
-This example shows how `SlimMessageBus` and `SlimMessageBus.Host.Memory` can be used to implement Domain Events pattern. The provider passes messages in the same app domain process (no external message broker is required).
+This example shows how `SlimMessageBus` and `SlimMessageBus.Host.Memory` can be used to implement the Domain Events pattern. The provider passes messages in the same app domain process (no external message broker is required).
 
 The domain event is a simple POCO:
 
 ```cs
 // domain event
-public class OrderSubmittedEvent
-{
-   public Order Order { get; }
-   public DateTime Timestamp { get; }
-
-   public OrderSubmittedEvent(Order order) { ... }
-}
+public record OrderSubmittedEvent(Order Order, DateTime Timestamp);
 ```
 
 The event handler implements the `IConsumer<T>` interface:
@@ -222,7 +221,7 @@ The event handler implements the `IConsumer<T>` interface:
 // domain event handler
 public class OrderSubmittedHandler : IConsumer<OrderSubmittedEvent>
 {
-   public Task OnHandle(OrderSubmittedEvent e, string name)
+   public Task OnHandle(OrderSubmittedEvent e, string path)
    {
       Console.WriteLine("Customer {0} {1} just placed an order for:", e.Order.Customer.Firstname, e.Order.Customer.Lastname);
       foreach (var orderLine in e.Order.Lines)
@@ -236,7 +235,8 @@ public class OrderSubmittedHandler : IConsumer<OrderSubmittedEvent>
 }
 ```
 
-The domain handler (well, really the consumer) is obtained from the dependency resolver at the time of event publication. It can be scoped (per web request, per unit of work) as configured in your favorite DI container.
+The domain event handler (consumer) is obtained from the dependency resolver at the time of event publication.
+It can be scoped (per web request, per unit of work) as configured in your favorite DI container.
 
 Somewhere in your domain layer, the domain event gets raised:
 
@@ -262,8 +262,7 @@ public class Order
    {
       State = OrderState.Submitted;
 
-      var e = new OrderSubmittedEvent(this);
-      return MessageBus.Current.Publish(e); // raise domain event
+      return MessageBus.Current.Publish(new OrderSubmittedEvent(this)); // raise domain event
    }
 }
 ```
@@ -277,10 +276,10 @@ var order = new Order(john);
 order.Add("id_machine_gun", 2);
 order.Add("id_grenade", 4);
 
-order.Submit(); // events fired here
+await order.Submit(); // events fired here
 ```
 
-Notice the static `MessageBus.Current` property might actually be configured to resolve a scoped `IMessageBus` instance (web request-scoped).
+Notice the static `MessageBus.Current` property might actually be configured to resolve a scoped `IMessageBus` instance (web request-scoped or pick up message scope from an external bus).
 
 The `SlimMessageBus` configuration for in-memory provider looks like this:
 
@@ -350,7 +349,7 @@ public class GenerateThumbnailRequestHandler : IRequestHandler<GenerateThumbnail
 }
 ```
 
-The response gets replied onto the originating WebApi instance and the Task<GenerateThumbnailResponse> resolves causing the queued HTTP request to serve the resized image thumbnail.
+The response gets replied to the originating WebApi instance and the `Task<GenerateThumbnailResponse>` resolves causing the queued HTTP request to serve the resized image thumbnail.
 
 ```cs
 var thumbGenResponse = await _bus.Send(new GenerateThumbnailRequest(fileId, mode, w, h));
@@ -427,32 +426,32 @@ Check out the complete [sample](/src/Samples#sampleimages) for image resizing.
 
 ## Features
 
-* Types of messaging patterns supported:
-  * Publish-subscribe
-  * Request-response
-  * Queues
-  * Hybrid of the above (e.g. Kafka with multiple topic consumers in one group)
-* Modern async/await syntax and TPL
-* Fluent configuration
-* Because SlimMessageBus is a facade, you have the ability to swap broker implementations
-  * Using nuget pull another broker provider
-  * Reconfigure SlimMessageBus and retest your app
-  * Try out the messaging middleware that works best for your app (Kafka vs. Redis) without having to rewrite your app.
+- Types of messaging patterns supported:
+  - Publish-subscribe
+  - Request-response
+  - Queues
+  - Hybrid of the above (e.g. Kafka with multiple topic consumers in one group)
+- Modern async/await syntax and TPL
+- Fluent configuration
+- Because SlimMessageBus is a facade, you have the ability to swap broker implementations
+  - Using NuGet pull another broker provider
+  - Reconfigure SlimMessageBus and retest your app
+  - Try out the messaging middleware that works best for your app (Kafka vs. Redis) without having to rewrite your app.
 
 ## Principles
 
-* The core of `SlimMessageBus` is "slim"
-  * Simple, common and friendly API to work with messaging systems
-  * No external dependencies.
-  * The core interface can be used in domain model (e.g. Domain Events)
-* Plugin architecture:
-  * DI integration (Microsoft.Extensions.DependencyInjection, Autofac, CommonServiceLocator, Unity)
-  * Message serialization (JSON, XML)
-  * Use your favorite messaging broker as provider by simply pulling a NuGet package
-* No threads created (pure TPL)
-* Async/Await support
-* Fluent configuration
-* Logging is done via [`Microsoft.Extensions.Logging.Abstractions`](https://www.nuget.org/packages/Microsoft.Extensions.Logging.Abstractions/), so that you can connect your favorite logger provider.
+- The core of `SlimMessageBus` is "slim"
+  - Simple, common and friendly API to work with messaging systems
+  - No external dependencies.
+  - The core interface can be used in domain model (e.g. Domain Events)
+- Plugin architecture:
+  - DI integration (Microsoft.Extensions.DependencyInjection, Autofac, CommonServiceLocator, Unity)
+  - Message serialization (JSON, XML)
+  - Use your favorite messaging broker as a provider by simply pulling a NuGet package
+- No threads created (pure TPL)
+- Async/Await support
+- Fluent configuration
+- Logging is done via [`Microsoft.Extensions.Logging.Abstractions`](https://www.nuget.org/packages/Microsoft.Extensions.Logging.Abstractions/) so that you can connect to your favorite logger provider.
 
 ## License
 
@@ -471,7 +470,7 @@ NuGet packaged end up in `dist` folder
 ## Testing
 
 To run tests you need to update the respective `appsettings.json` to match your own cloud infrastructure or local infrastructure.
-SMB has some message brokers setup on Azure for integration tests (secrets not shared).
+SMB has some message brokers set up on Azure for integration tests (secrets not shared).
 
 Run all tests:
 
@@ -479,7 +478,7 @@ Run all tests:
 dotnet test
 ```
 
-Run all tests except  integration tests which require local/cloud infrastructure:
+Run all tests except  integration tests that require local/cloud infrastructure:
 
 ```cmd
 dotnet test --filter Category!=Integration

@@ -19,6 +19,7 @@ namespace SlimMessageBus.Host.Integration
     using System.Diagnostics;
     using FluentAssertions;
     using System.Linq;
+    using System.Threading;
 
     public class HybridTests
     {
@@ -73,10 +74,19 @@ namespace SlimMessageBus.Host.Integration
             serviceProvider = services.BuildServiceProvider();
         }
 
+        internal record EventMark(Guid CorrelationId, string Name);
+
+        /// <summary>
+        /// This test ensures that in a hybris bus setup External (Azure Service Bus) and Internal (Memory) the external message scope is carried over to memory bus, 
+        /// and that the interceptors are invoked (and in the correct order).
+        /// </summary>
+        /// <returns></returns>
         [Fact]
         public async Task When_PublishToMemoryBus_Given_InsideConsumerWithMessageScope_Then_MessageScopeIsCarriedOverToMemoryBusConsumer()
         {
             // arrange
+            var topic = "integration-external-message";
+
             SetupBus(
                 memoryBuilder: (mbb) =>
                 {
@@ -85,79 +95,64 @@ namespace SlimMessageBus.Host.Integration
                 },
                 asbBuilder: (mbb) =>
                 {
-                    mbb.Produce<ExternalMessage>(x => x.DefaultTopic("test-ping"));
-                    mbb.Consume<ExternalMessage>(x => x.Topic("test-ping").SubscriptionName("subscriber-0").WithConsumer<ExternalMessageConsumer>());
+                    mbb.Produce<ExternalMessage>(x => x.DefaultTopic(topic));
+                    mbb.Consume<ExternalMessage>(x => x.Topic(topic).SubscriptionName("test").WithConsumer<ExternalMessageConsumer>());
                 },
                 servicesBuilder: services =>
                 {
                     services.AddTransient<InternalMessageConsumer>();
                     services.AddTransient<ExternalMessageConsumer>();
 
-                    // Unit of work should be shared between InternalMessageConsumer and ExternalMessageConsumer
+                    services.AddTransient<IPublishInterceptor<InternalMessage>, InternalMessagePublishInterceptor>();
+                    services.AddTransient<IPublishInterceptor<ExternalMessage>, ExternalMessagePublishInterceptor>();
+
+                    // Unit of work should be shared between InternalMessageConsumer and ExternalMessageConsumer.
+                    // External consumer creates a message scope which continues to itnernal consumer.
                     services.AddScoped<UnitOfWork>();
 
-                    services.AddSingleton<SingletonStore>();
+                    // This is a singleton that will collect all the events that happened to verify later what actually happened.
+                    services.AddSingleton<TestEventCollector<EventMark>>();
                 }
             );
 
             var bus = serviceProvider.GetRequiredService<IPublishBus>();
 
+            var store = serviceProvider.GetRequiredService<TestEventCollector<EventMark>>();
+
+            // Eat up all the outstanding message in case the last test left some
+            await store.WaitUntilArriving(newMessagesTimeout: 2);
+
+            store.Clear();
+            store.Start();
+
             // act
-            await bus.Publish(new ExternalMessage());
+            await bus.Publish(new ExternalMessage(Guid.NewGuid()));
 
             // assert
-            var singletonStore = serviceProvider.GetRequiredService<SingletonStore>();
+            var expectedStoreCount = 4;
 
             // wait until arrives
-            var stopwatch = Stopwatch.StartNew();
-            while (singletonStore.Count != 2 && stopwatch.Elapsed.TotalSeconds < 10)
-            {
-                await Task.Delay(1000);
-            }
+            await store.WaitUntilArriving(newMessagesTimeout: 5, expectedCount: expectedStoreCount);
 
-            var snapshot = singletonStore.Snapshot();
+            var snapshot = store.Snapshot();
 
-            snapshot.Count.Should().Be(2);
-            var grouping = snapshot.GroupBy(x => x.Item1, x => x.Item2).ToDictionary(x => x.Key, x => x.ToList());
+            snapshot.Count.Should().Be(expectedStoreCount);
+            var grouping = snapshot.GroupBy(x => x.CorrelationId, x => x.Name).ToDictionary(x => x.Key, x => x.ToList());
 
-            grouping.Count.Should().Be(1);
-            
+            // all of the invocations should happen within the context of one unitOfWork = One CorrelationId = One Message Scope
+            grouping.Count.Should().Be(2);
+
             // in this order
-            grouping.Values.First()[0].Should().Be(nameof(ExternalMessageConsumer));
-            grouping.Values.First()[1].Should().Be(nameof(InternalMessageConsumer));
-        }
+            var eventsThatHappenedWhenExternalWasPublished = grouping.Values.SingleOrDefault(x => x.Count == 1);
+            eventsThatHappenedWhenExternalWasPublished.Should().NotBeEmpty();
+            eventsThatHappenedWhenExternalWasPublished[0].Should().Be(nameof(ExternalMessagePublishInterceptor));
 
-        internal class SingletonStore
-        {
-            private readonly IList<(Guid, string)> list = new List<(Guid, string)>();
-
-            public void Add(Guid correlationId, string name)
-            {
-                lock (list)
-                {
-                    list.Add((correlationId, name));
-                }
-            }
-
-            public IList<(Guid, string)> Snapshot()
-            {
-                lock (list)
-                {
-                    var snapshot = new List<(Guid, string)>(list);
-                    return snapshot;
-                }
-            }
-
-            public int Count
-            {
-                get
-                {
-                    lock (list)
-                    {
-                        return list.Count;
-                    }
-                }
-            }
+            // in this order
+            var eventsThatHappenedWhenExternalWasConsumed = grouping.Values.SingleOrDefault(x => x.Count > 1);
+            eventsThatHappenedWhenExternalWasConsumed.Should().NotBeEmpty();
+            eventsThatHappenedWhenExternalWasConsumed[0].Should().Be(nameof(ExternalMessageConsumer));
+            eventsThatHappenedWhenExternalWasConsumed[1].Should().Be(nameof(InternalMessagePublishInterceptor));
+            eventsThatHappenedWhenExternalWasConsumed[2].Should().Be(nameof(InternalMessageConsumer));
         }
 
         internal class UnitOfWork
@@ -171,22 +166,25 @@ namespace SlimMessageBus.Host.Integration
         {
             private readonly IMessageBus bus;
             private readonly UnitOfWork unitOfWork;
-            private readonly SingletonStore singletonStore;
+            private readonly TestEventCollector<EventMark> store;
 
-            public ExternalMessageConsumer(IMessageBus bus, UnitOfWork unitOfWork, SingletonStore singletonStore)
+            public ExternalMessageConsumer(IMessageBus bus, UnitOfWork unitOfWork, TestEventCollector<EventMark> store)
             {
                 this.bus = bus;
                 this.unitOfWork = unitOfWork;
-                this.singletonStore = singletonStore;
+                this.store = store;
             }
 
             public async Task OnHandle(ExternalMessage message, string path)
             {
-                singletonStore.Add(unitOfWork.CorrelationId, nameof(ExternalMessageConsumer));
+                store.Add(new(unitOfWork.CorrelationId, nameof(ExternalMessageConsumer)));
+
+                // ensure the test has started
+                if (!store.IsStarted) return;
 
                 // some processing
 
-                await bus.Publish(new InternalMessage());
+                await bus.Publish(new InternalMessage(message.CustomerId));
 
                 // some processing
 
@@ -197,17 +195,17 @@ namespace SlimMessageBus.Host.Integration
         internal class InternalMessageConsumer : IConsumer<InternalMessage>
         {
             private readonly UnitOfWork unitOfWork;
-            private readonly SingletonStore singletonStore;
+            private readonly TestEventCollector<EventMark> store;
 
-            public InternalMessageConsumer(UnitOfWork unitOfWork, SingletonStore singletonStore)
+            public InternalMessageConsumer(UnitOfWork unitOfWork, TestEventCollector<EventMark> store)
             {
                 this.unitOfWork = unitOfWork;
-                this.singletonStore = singletonStore;
+                this.store = store;
             }
 
             public Task OnHandle(InternalMessage message, string path)
             {
-                singletonStore.Add(unitOfWork.CorrelationId, nameof(InternalMessageConsumer));
+                store.Add(new(unitOfWork.CorrelationId, nameof(InternalMessageConsumer)));
 
                 // some processing
 
@@ -215,12 +213,47 @@ namespace SlimMessageBus.Host.Integration
             }
         }
 
-        internal class ExternalMessage
+        internal record ExternalMessage(Guid CustomerId);
+
+        internal record InternalMessage(Guid CustomerId);
+
+        internal class InternalMessagePublishInterceptor : IPublishInterceptor<InternalMessage>
         {
+            private readonly UnitOfWork unitOfWork;
+            private readonly TestEventCollector<EventMark> store;
+
+            public InternalMessagePublishInterceptor(UnitOfWork unitOfWork, TestEventCollector<EventMark> store)
+            {
+                this.unitOfWork = unitOfWork;
+                this.store = store;
+            }
+
+            public Task OnHandle(InternalMessage message, CancellationToken cancellationToken, Func<Task> next, IMessageBus bus, string path, IDictionary<string, object> headers)
+            {
+                store.Add(new(unitOfWork.CorrelationId, nameof(InternalMessagePublishInterceptor)));
+
+                return next();
+            }
         }
 
-        internal class InternalMessage
+        internal class ExternalMessagePublishInterceptor : IPublishInterceptor<ExternalMessage>
         {
+            private readonly UnitOfWork unitOfWork;
+            private readonly TestEventCollector<EventMark> store;
+
+            public ExternalMessagePublishInterceptor(UnitOfWork unitOfWork, TestEventCollector<EventMark> store)
+            {
+                this.unitOfWork = unitOfWork;
+                this.store = store;
+            }
+
+            public Task OnHandle(ExternalMessage message, CancellationToken cancellationToken, Func<Task> next, IMessageBus bus, string path, IDictionary<string, object> headers)
+            {
+                store.Add(new(unitOfWork.CorrelationId, nameof(ExternalMessagePublishInterceptor)));
+
+                return next();
+            }
         }
+
     }
 }

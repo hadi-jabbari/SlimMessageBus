@@ -60,7 +60,7 @@
 
             services.AddTransient<IConsumerControl>(svp => svp.GetRequiredService<IMasterMessageBus>());
 
-            // Register scoped message buss - this is a super lightweight wrapper that just introduces the current DI scope
+            // Register transient message bus - this is a lightweight proxy that just introduces the current DI scope
             services.AddTransient(svp => new MessageBusProxy(svp.GetRequiredService<IMasterMessageBus>(), new MsDependencyInjectionDependencyResolver(svp)));
 
             services.AddTransient<IMessageBus>(svp => svp.GetRequiredService<MessageBusProxy>());
