@@ -156,11 +156,13 @@ services.AddSlimMessageBus((mbb, svp) =>
    }, 
    // Option 1 (optional)
    addConsumersFromAssembly: new[] { Assembly.GetExecutingAssembly() }, // auto discover consumers and register into DI (see next section)
+   addInterceptorsFromAssembly: new[] { Assembly.GetExecutingAssembly() } // auto discover interceptors and register into DI (see next section)
    addConfiguratorsFromAssembly: new[] { Assembly.GetExecutingAssembly() } // auto discover modular configuration and register into DI (see next section)
 );
 
 // Option 2 (optional)
 services.AddMessageBusConsumersFromAssembly(Assembly.GetExecutingAssembly());
+services.AddMessageBusInterceptorsFromAssembly(Assembly.GetExecutingAssembly());
 services.AddMessageBusConfiguratorsFromAssembly(Assembly.GetExecutingAssembly());
 ```
 

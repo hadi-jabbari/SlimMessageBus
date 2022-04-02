@@ -6,6 +6,7 @@ namespace SlimMessageBus.Host.Test
     using Moq;
     using SlimMessageBus.Host.Config;
     using SlimMessageBus.Host.DependencyResolver;
+    using SlimMessageBus.Host.Interceptor;
     using SlimMessageBus.Host.Serialization;
 
     public class MessageBusMock

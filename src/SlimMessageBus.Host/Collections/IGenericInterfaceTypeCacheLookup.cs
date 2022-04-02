@@ -1,5 +1,6 @@
 ﻿namespace SlimMessageBus.Host.Collections
 {
+    using SlimMessageBus.Host.Interceptor;
     using System;
     using System.Collections.Generic;
 
@@ -24,8 +25,10 @@
     {
         public BusGenericInterfaceTypeCacheLookup()
         {
-            Add(typeof(IPublishInterceptor<>), nameof(IPublishInterceptor<object>.OnHandle));
+            Add(typeof(IProducerInterceptor<>), nameof(IProducerInterceptor<object>.OnHandle));
             Add(typeof(IConsumerInterceptor<>), nameof(IConsumerInterceptor<object>.OnHandle));
+
+            Add(typeof(IPublishInterceptor<>), nameof(IPublishInterceptor<object>.OnHandle));
 
             Add(typeof(ISendInterceptor<,>), nameof(ISendInterceptor<object, object>.OnHandle));
             Add(typeof(IRequestHandlerInterceptor<,>), nameof(IRequestHandlerInterceptor<object, object>.OnHandle));

@@ -10,6 +10,7 @@ namespace SlimMessageBus.Host.Memory.Test
     using Newtonsoft.Json;
     using SlimMessageBus.Host.Config;
     using SlimMessageBus.Host.DependencyResolver;
+    using SlimMessageBus.Host.Interceptor;
     using SlimMessageBus.Host.Serialization;
     using Xunit;
 

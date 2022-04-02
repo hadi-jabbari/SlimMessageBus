@@ -11,14 +11,15 @@ namespace SlimMessageBus.Host
     using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.Config;
     using SlimMessageBus.Host.DependencyResolver;
+    using SlimMessageBus.Host.Interceptor;
     using SlimMessageBus.Host.Serialization;
 
     public abstract class MessageBusBase : IMasterMessageBus, IAsyncDisposable
     {
         private readonly ILogger _logger;
         private CancellationTokenSource _cancellationTokenSource = new();
+        private readonly GenericInterfaceTypeCache _producerInterceptorTypeCache;
         private readonly GenericInterfaceTypeCache _publishInterceptorTypeCache;
-        private readonly IDependencyResolver _scopedDependencyResolver;
 
         public ILoggerFactory LoggerFactory { get; }
 
@@ -48,8 +49,8 @@ namespace SlimMessageBus.Host
 
             _logger = LoggerFactory.CreateLogger<MessageBusBase>();
 
+            _producerInterceptorTypeCache = GenericInterfaceTypeCacheLookup[typeof(IProducerInterceptor<>)];
             _publishInterceptorTypeCache = GenericInterfaceTypeCacheLookup[typeof(IPublishInterceptor<>)];
-            _scopedDependencyResolver = new MessageScopeAwareDependencyResolverDecorator(settings.DependencyResolver);
         }
 
         /// <summary>
@@ -318,31 +319,48 @@ namespace SlimMessageBus.Host
 
             var producerSettings = GetProducerSettings(messageType);
 
-            if (path == null)
-            {
-                path = GetDefaultPath(producerSettings.MessageType, producerSettings);
-            }
+            path ??= GetDefaultPath(producerSettings.MessageType, producerSettings);
 
             var actualMessageType = message.GetType();
 
             var messageHeaders = CreateHeaders();
             AddMessageHeaders(messageHeaders, headers, message, producerSettings);
 
-            var publishInterceptors = _publishInterceptorTypeCache.ResolveAll(currentDependencyResolver ?? _scopedDependencyResolver, actualMessageType);
-            if (publishInterceptors != null && publishInterceptors.Any())
-            {
-                var publishInterceptorType = _publishInterceptorTypeCache.Get(actualMessageType);
+            var resolver = currentDependencyResolver ?? Settings.DependencyResolver;
 
+            var producerInterceptors = _producerInterceptorTypeCache.ResolveAll(resolver, actualMessageType);
+            var publishInterceptors = _publishInterceptorTypeCache.ResolveAll(resolver, actualMessageType);
+            if (producerInterceptors != null || publishInterceptors != null)
+            {
                 // ToDo: Introduce CTs
                 var ct = new CancellationToken();
 
                 var next = () => PublishInternal(message, path, messageHeaders, producerSettings);
-                foreach (var publishInterceptor in publishInterceptors)
+
+                // Note: In this particular order - we want the publish interceptor to be wrapped by produce interceptor
+
+                if (publishInterceptors != null)
                 {
-                    // The params follow IPublishInterceptor<>.OnHandle parameters
-                    var interceptorParams = new object[] { message, ct, next, this, path, headers };
-                    next = () => (Task)publishInterceptorType.Method.Invoke(publishInterceptor, interceptorParams);
+                    var publishInterceptorType = _publishInterceptorTypeCache.Get(actualMessageType);
+                    foreach (var publishInterceptor in publishInterceptors)
+                    {
+                        // The params follow IPublishInterceptor<>.OnHandle parameters
+                        var interceptorParams = new object[] { message, ct, next, this, path, headers };
+                        next = () => (Task)publishInterceptorType.Method.Invoke(publishInterceptor, interceptorParams);
+                    }
                 }
+
+                if (producerInterceptors != null)
+                {
+                    var producerInterceptorType = _producerInterceptorTypeCache.Get(actualMessageType);
+                    foreach (var producerInterceptor in producerInterceptors)
+                    {
+                        // The params follow IPublishInterceptor<>.OnHandle parameters
+                        var interceptorParams = new object[] { message, ct, next, this, path, headers };
+                        next = () => (Task)producerInterceptorType.Method.Invoke(producerInterceptor, interceptorParams);
+                    }
+                }                
+
                 return next();
             }
 

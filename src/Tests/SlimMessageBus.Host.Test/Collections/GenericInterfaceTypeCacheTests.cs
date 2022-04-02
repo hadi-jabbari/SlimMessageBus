@@ -4,8 +4,10 @@
     using Moq;
     using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.DependencyResolver;
+    using SlimMessageBus.Host.Interceptor;
     using System;
     using System.Collections.Generic;
+    using System.Linq;
     using System.Threading;
     using System.Threading.Tasks;
     using Xunit;
@@ -24,7 +26,7 @@
         }
 
         [Fact]
-        public void ResolveAll_Works()
+        public void When_ResolveAll_Given_OneRegistrationExists_Then_ReturnsThatRegistration()
         {
             // arrange
             var subject = new GenericInterfaceTypeCache(typeof(IConsumerInterceptor<>), nameof(IConsumerInterceptor<object>.OnHandle));
@@ -35,6 +37,27 @@
             // assert
             scopeMock.Verify(x => x.Resolve(typeof(IEnumerable<IConsumerInterceptor<SomeMessage>>)), Times.Once);
             scopeMock.VerifyNoOtherCalls();
+
+            interceptors.Should().HaveCount(1);
+            interceptors.Should().Contain(consumerInterceptorMock.Object);
+        }
+
+        [Fact]
+        public void When_ResolveAll_Given_NoRegistrations_Then_ReturnsNull()
+        {
+            // arrange
+            var subject = new GenericInterfaceTypeCache(typeof(IConsumerInterceptor<>), nameof(IConsumerInterceptor<object>.OnHandle));
+
+            scopeMock.Setup(x => x.Resolve(typeof(IEnumerable<IConsumerInterceptor<SomeMessage>>))).Returns(() => Enumerable.Empty<object>());
+
+            // act
+            var interceptors = subject.ResolveAll(scopeMock.Object, typeof(SomeMessage));
+
+            // assert
+            scopeMock.Verify(x => x.Resolve(typeof(IEnumerable<IConsumerInterceptor<SomeMessage>>)), Times.Once);
+            scopeMock.VerifyNoOtherCalls();
+
+            interceptors.Should().BeNull();
         }
 
         [Fact]

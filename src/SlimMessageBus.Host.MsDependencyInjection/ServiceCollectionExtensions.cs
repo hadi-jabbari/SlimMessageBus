@@ -3,7 +3,9 @@
     using Microsoft.Extensions.DependencyInjection;
     using Microsoft.Extensions.Logging;
     using SlimMessageBus.Host.Config;
+    using SlimMessageBus.Host.Interceptor;
     using System;
+    using System.Collections.Generic;
     using System.Linq;
     using System.Reflection;
 
@@ -18,6 +20,7 @@
         /// <param name="configureDependencyResolver">Confgure the DI plugin on the <see cref="MessageBusBuilder"/>. Default is true.</param>
         /// <param name="addConsumersFromAssembly">Specifies the list of assemblies to be searched for <see cref="IConsumer{TMessage}"/> or <see cref="IRequestHandler{TRequest, TResponse}"/> implementationss. The found types are added to the DI as Transient service.</param>
         /// <param name="addConfiguratorsFromAssembly">Specifies the list of assemblies to be searched for <see cref="IMessageBusConfigurator"/>. The found types are added to the DI as Transient service.</param>
+        /// <param name="addInterceptorsFromAssembly">Specifies the list of assemblies to be searched for interceptors (<see cref="IPublishInterceptor{TMessage}"/>, <see cref="ISendInterceptor{TRequest, TResponse}"/>, <see cref="IConsumerInterceptor{TMessage}"/>, <see cref="IRequestHandler{TRequest, TResponse}"/>). The found types are added to the DI as Transient service.</param>
         /// <returns></returns>
         public static IServiceCollection AddSlimMessageBus(
             this IServiceCollection services,
@@ -76,6 +79,16 @@
             return services;
         }
 
+        private static IEnumerable<(Type Type, Type InterfaceType)> GetAllProspectTypesWithInterface(IEnumerable<Assembly> assemblies)
+        {
+            var foundTypes = assemblies
+                .SelectMany(x => x.GetTypes())
+                .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible)
+                .SelectMany(t => t.GetInterfaces(), (t, i) => (Type: t, InterfaceType: i));
+
+            return foundTypes;
+        }
+
         /// <summary>
         /// Scans the specified assemblies (using reflection) for types that implement either <see cref="IConsumer{TMessage}"/> or <see cref="IRequestHandler{TRequest, TResponse}"/>. 
         /// The found types are registered in the DI as Transient service.
@@ -86,15 +99,12 @@
         /// <returns></returns>
         public static IServiceCollection AddMessageBusConsumersFromAssembly(this IServiceCollection services, Func<Type, bool> filterPredicate, params Assembly[] assemblies)
         {
-            var foundTypes = assemblies
-                .SelectMany(x => x.GetTypes())
-                .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible)
-                .SelectMany(t => t.GetInterfaces(), (t, i) => new { Type = t, Interface = i })
-                .Where(x => x.Interface.IsGenericType && (x.Interface.GetGenericTypeDefinition() == typeof(IConsumer<>) || x.Interface.GetGenericTypeDefinition() == typeof(IRequestHandler<,>)))
+            var foundTypes = GetAllProspectTypesWithInterface(assemblies)
+                .Where(x => x.InterfaceType.IsGenericType && GenericTypesConsumers.Contains(x.InterfaceType.GetGenericTypeDefinition()))
                 .Where(x => filterPredicate == null || filterPredicate(x.Type))
                 .Select(x =>
                 {
-                    var genericArguments = x.Interface.GetGenericArguments();
+                    var genericArguments = x.InterfaceType.GetGenericArguments();
                     return new
                     {
                         ConsumerType = x.Type,
@@ -111,6 +121,12 @@
 
             return services;
         }
+
+        private static readonly Type[] GenericTypesConsumers = new[]
+        {
+            typeof(IConsumer<>),
+            typeof(IRequestHandler<,>)
+        };
 
         /// <summary>
         /// Scans the specified assemblies (using reflection) for types that implement either <see cref="IConsumer{TMessage}"/> or <see cref="IRequestHandler{TRequest, TResponse}"/>. 
@@ -131,11 +147,8 @@
         /// <returns></returns>
         public static IServiceCollection AddMessageBusConfiguratorsFromAssembly(this IServiceCollection services, params Assembly[] assemblies)
         {
-            var foundTypes = assemblies
-                .SelectMany(x => x.GetTypes())
-                .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible)
-                .SelectMany(t => t.GetInterfaces(), (t, i) => new { Type = t, Interface = i })
-                .Where(x => x.Interface == typeof(IMessageBusConfigurator))
+            var foundTypes = GetAllProspectTypesWithInterface(assemblies)
+                .Where(x => x.InterfaceType == typeof(IMessageBusConfigurator))
                 .Select(x => x.Type)
                 .ToList();
 
@@ -156,16 +169,13 @@
         /// <returns></returns>
         public static IServiceCollection AddMessageBusInterceptorsFromAssembly(this IServiceCollection services, params Assembly[] assemblies)
         {
-            var foundTypes = assemblies
-                .SelectMany(x => x.GetTypes())
-                .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible)
-                .SelectMany(t => t.GetInterfaces(), (t, i) => new { Type = t, Interface = i })
-                .Where(x => x.Interface.IsGenericType && GenericTypesInterceptors.Contains(x.Interface.GetGenericTypeDefinition()))
+            var foundTypes = GetAllProspectTypesWithInterface(assemblies)
+                .Where(x => x.InterfaceType.IsGenericType && GenericTypesInterceptors.Contains(x.InterfaceType.GetGenericTypeDefinition()))
                 .ToList();
 
             foreach (var foundType in foundTypes)
             {
-                services.AddTransient(foundType.Interface, foundType.Type);
+                services.AddTransient(foundType.InterfaceType, foundType.Type);
             }
 
             return services;
@@ -173,8 +183,11 @@
 
         private static readonly Type[] GenericTypesInterceptors = new[]
         {
-            typeof(IPublishInterceptor<>),
+            typeof(IProducerInterceptor<>),
             typeof(IConsumerInterceptor<>),
+
+            typeof(IPublishInterceptor<>),
+
             typeof(ISendInterceptor<,>),
             typeof(IRequestHandlerInterceptor<,>)
         };

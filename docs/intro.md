@@ -29,6 +29,7 @@
 - [Serialization](#serialization)
 - [Message Headers](#message-headers)
   - [Message Type Resolver](#message-type-resolver)
+- [Interceptors](#interceptors)
 - [Logging](#logging)
 - [Provider specific functionality](#provider-specific-functionality)
 
@@ -185,6 +186,8 @@ await bus.Publish(new CustomerChangedEvent { });
 
 #### Producer hooks
 
+> The [Interceptors](#interceptors) is a newer approach that should be used instead of the hooks.
+
 When you need to intercept a message that is being published or sent via the bus, you can use the available producer hooks:
 
 ```cs
@@ -324,6 +327,8 @@ await consumerControl.Stop();
 
 #### Consumer hooks
 
+> The [Interceptors](#interceptors) is a newer approach that should be used instead of the hooks.
+
 When you need to intercept a message that is delivered to a consumer, you can use the available consumer hooks:
 
 ```cs
@@ -446,20 +451,20 @@ mbb.Consume<Message2>(x => x
 
 > Per-message scope is enabled by default for all transports except the in-memory transport. This should work for most scenarios.
 
-For more advanced scenarios (third-party plugins) the SMB runtime provides a static accessor `MessageScope.Current` which allows to get ahold of the message scope for the currently running consumer instance.
+For more advanced scenarios (third-party plugins) the SMB runtime provides a static accessor `MessageScope.Current` which allows getting ahold of the message scope for the currently running consumer instance.
 
 #### Hybrid bus and message scope reuse
 
-In the case of using the hybird message bus (`SlimMessageBus.Host.Hybrid` package) you might have a setup where there are two or more bus instances. 
-For example the Azure Service Bus (ASB) might be used to consume messages arriving to your service (by default each arriving message will have a DI scope created) and the memory bus (`SlimMessageBus.Host.Memory`) to implement domain events.
-In this scenario the arriving message on ASB would create a message scope, and as part of message handling your code might raise some domain events (in process messages) via the Memory bus. 
+In the case of using the hybrid message bus (`SlimMessageBus.Host.Hybrid` package) you might have a setup where there are two or more bus instances.
+For example, the Azure Service Bus (ASB) might be used to consume messages arriving to your service (by default each arriving message will have a DI scope created) and the memory bus (`SlimMessageBus.Host.Memory`) to implement domain events.
+In this scenario, the arriving message on ASB would create a message scope, and as part of message handling your code might raise some domain events (in process messages) via the Memory bus.
 Here the memory bus would detect there is a message scope already started and will use that to resolve its domain handlers/consumers and required dependencies.
 
-> In a Hybrid bus setup, the Memory bus will detect if there is already a started messsage scope and use that to resolve its dependencies from. 
+> In a Hybrid bus setup, the Memory bus will detect if there is already a started message scope and use that to resolve its dependencies from.
 
 #### Concurrently processed messages
 
-The `.Instances(n)` allows to set the `n` number of concurrently processed messages within the same consumer type.
+The `.Instances(n)` allows setting the number of concurrently processed messages within the same consumer type.
 
 ```cs
 mbb.Consume<SomeMessage>(x => x
@@ -480,10 +485,10 @@ Each processing of a message resolves the `TConsumer` instance from the DI.
 
 ## Request-response communication
 
-SMB provides implementation of request-response over topics or queues - depending what the underlying provider supports.
-This allows to asynchronously await a response for a request message that your service sent.
+SMB provides an implementation of request-response over topics or queues - depending on what the underlying provider supports.
+This allows one to asynchronously await a response for a request message that your service sent.
 
-Typically this simplifies service interactions that need to await for a result. To make your app scallable, there is no need to rewrite the interaction as fire and forget style, with storing the state, and writing another consumer that resumes processing when the response arrives.
+Typically this simplifies service interactions that need to wait for a result. To make your app scallable, there is no need to rewrite the interaction as fire and forget style, with storing the state and writing another consumer that resumes processing when the response arrives.
 
 ### Delivery quarantees
 
@@ -760,6 +765,10 @@ mbb.WithMessageTypeResolver(mtr)
 ```
 
 A custom resolver could be used in scenarios when there is a desire to send short type names (to optimize overall message size). In this scenario the assembly name and/or namespace could be skipped - the producer and consumer could infer them.
+
+## Interceptors
+
+ToDo
 
 ## Logging
 

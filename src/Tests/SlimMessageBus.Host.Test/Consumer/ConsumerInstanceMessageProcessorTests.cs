@@ -8,6 +8,7 @@
     using Moq;
     using SlimMessageBus.Host.Config;
     using SlimMessageBus.Host.DependencyResolver;
+    using SlimMessageBus.Host.Interceptor;
     using Xunit;
 
     public class ConsumerInstanceMessageProcessorTests
