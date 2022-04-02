@@ -25,7 +25,8 @@
             ILoggerFactory loggerFactory = null,
             bool configureDependencyResolver = true,
             Assembly[] addConsumersFromAssembly = null,
-            Assembly[] addConfiguratorsFromAssembly = null)
+            Assembly[] addConfiguratorsFromAssembly = null,
+            Assembly[] addInterceptorsFromAssembly = null)
         {
             if (addConsumersFromAssembly != null)
             {
@@ -36,7 +37,12 @@
             {
                 services.AddMessageBusConfiguratorsFromAssembly(addConfiguratorsFromAssembly);
             }
-            
+
+            if (addInterceptorsFromAssembly != null)
+            {
+                services.AddMessageBusInterceptorsFromAssembly(addInterceptorsFromAssembly);
+            }
+
             // Single master bus that holds the defined consumers and message processing pipelines
             services.AddSingleton((svp) =>
             {
@@ -78,10 +84,7 @@
         /// <param name="filterPredicate">Filtering predicate that allows to further narrow down the </param>
         /// <param name="assemblies">Assemblies to be scanned</param>
         /// <returns></returns>
-        public static IServiceCollection AddMessageBusConsumersFromAssembly(
-            this IServiceCollection services,
-            Func<Type, bool> filterPredicate,
-            params Assembly[] assemblies)
+        public static IServiceCollection AddMessageBusConsumersFromAssembly(this IServiceCollection services, Func<Type, bool> filterPredicate, params Assembly[] assemblies)
         {
             var foundTypes = assemblies
                 .SelectMany(x => x.GetTypes())
@@ -116,9 +119,7 @@
         /// <param name="services"></param>
         /// <param name="assemblies">Assemblies to be scanned</param>
         /// <returns></returns>
-        public static IServiceCollection AddMessageBusConsumersFromAssembly(
-            this IServiceCollection services,
-            params Assembly[] assemblies)
+        public static IServiceCollection AddMessageBusConsumersFromAssembly(this IServiceCollection services, params Assembly[] assemblies)
             => services.AddMessageBusConsumersFromAssembly(filterPredicate: null, assemblies);
 
         /// <summary>
@@ -128,17 +129,15 @@
         /// <param name="services"></param>
         /// <param name="assemblies">Assemblies to be scanned</param>
         /// <returns></returns>
-        public static IServiceCollection AddMessageBusConfiguratorsFromAssembly(
-            this IServiceCollection services,
-            params Assembly[] assemblies)
+        public static IServiceCollection AddMessageBusConfiguratorsFromAssembly(this IServiceCollection services, params Assembly[] assemblies)
         {
             var foundTypes = assemblies
-            .SelectMany(x => x.GetTypes())
-            .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible)
-            .SelectMany(t => t.GetInterfaces(), (t, i) => new { Type = t, Interface = i })
-            .Where(x => x.Interface == typeof(IMessageBusConfigurator))
-            .Select(x => x.Type)
-            .ToList();
+                .SelectMany(x => x.GetTypes())
+                .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible)
+                .SelectMany(t => t.GetInterfaces(), (t, i) => new { Type = t, Interface = i })
+                .Where(x => x.Interface == typeof(IMessageBusConfigurator))
+                .Select(x => x.Type)
+                .ToList();
 
             foreach (var foundType in foundTypes)
             {
@@ -147,5 +146,37 @@
 
             return services;
         }
+
+        /// <summary>
+        /// Scans the specified assemblies (using reflection) for types that implement <see cref="IPublishInterceptor{TMessage}"/> or <see cref="IConsumerInterceptor{TMessage}"/> and adds them to DI.
+        /// This types will be use during message bus configuration.
+        /// </summary>
+        /// <param name="services"></param>
+        /// <param name="assemblies">Assemblies to be scanned</param>
+        /// <returns></returns>
+        public static IServiceCollection AddMessageBusInterceptorsFromAssembly(this IServiceCollection services, params Assembly[] assemblies)
+        {
+            var foundTypes = assemblies
+                .SelectMany(x => x.GetTypes())
+                .Where(t => t.IsClass && !t.IsAbstract && t.IsVisible)
+                .SelectMany(t => t.GetInterfaces(), (t, i) => new { Type = t, Interface = i })
+                .Where(x => x.Interface.IsGenericType && GenericTypesInterceptors.Contains(x.Interface.GetGenericTypeDefinition()))
+                .ToList();
+
+            foreach (var foundType in foundTypes)
+            {
+                services.AddTransient(foundType.Interface, foundType.Type);
+            }
+
+            return services;
+        }
+
+        private static readonly Type[] GenericTypesInterceptors = new[]
+        {
+            typeof(IPublishInterceptor<>),
+            typeof(IConsumerInterceptor<>),
+            typeof(ISendInterceptor<,>),
+            typeof(IRequestHandlerInterceptor<,>)
+        };
     }
 }
