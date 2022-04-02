@@ -50,6 +50,11 @@
             _producedMessages = new List<(Type messageType, string name, object message)>();
 
             _dependencyResolverMock = new Mock<IDependencyResolver>();
+            _dependencyResolverMock.Setup(x => x.Resolve(It.IsAny<Type>())).Returns((Type t) =>
+            {
+                if (t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IEnumerable<>)) return Enumerable.Empty<object>();
+                return null;
+            });
 
             BusBuilder = MessageBusBuilder.Create()
                 .Produce<RequestA>(x =>
