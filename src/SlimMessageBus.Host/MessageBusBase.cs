@@ -11,15 +11,13 @@ namespace SlimMessageBus.Host
     using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.Config;
     using SlimMessageBus.Host.DependencyResolver;
-    using SlimMessageBus.Host.Interceptor;
     using SlimMessageBus.Host.Serialization;
 
     public abstract class MessageBusBase : IMasterMessageBus, IAsyncDisposable
     {
         private readonly ILogger _logger;
         private CancellationTokenSource _cancellationTokenSource = new();
-        private readonly GenericInterfaceTypeCache _producerInterceptorTypeCache;
-        private readonly GenericInterfaceTypeCache _publishInterceptorTypeCache;
+        public RuntimeTypeCache RuntimeTypeCache { get; }
 
         public ILoggerFactory LoggerFactory { get; }
 
@@ -27,7 +25,6 @@ namespace SlimMessageBus.Host
 
         public virtual IMessageSerializer Serializer => Settings.Serializer;
 
-        public IGenericInterfaceTypeCacheLookup GenericInterfaceTypeCacheLookup { get; } = new BusGenericInterfaceTypeCacheLookup();
         protected ProducerByMessageTypeCache<ProducerSettings> ProducerSettingsByMessageType { get; private set; }
 
         protected IPendingRequestStore PendingRequestStore { get; set; }
@@ -49,8 +46,7 @@ namespace SlimMessageBus.Host
 
             _logger = LoggerFactory.CreateLogger<MessageBusBase>();
 
-            _producerInterceptorTypeCache = GenericInterfaceTypeCacheLookup[typeof(IProducerInterceptor<>)];
-            _publishInterceptorTypeCache = GenericInterfaceTypeCacheLookup[typeof(IPublishInterceptor<>)];
+            RuntimeTypeCache = new RuntimeTypeCache();
         }
 
         /// <summary>
@@ -328,8 +324,8 @@ namespace SlimMessageBus.Host
 
             var resolver = currentDependencyResolver ?? Settings.DependencyResolver;
 
-            var producerInterceptors = _producerInterceptorTypeCache.ResolveAll(resolver, actualMessageType);
-            var publishInterceptors = _publishInterceptorTypeCache.ResolveAll(resolver, actualMessageType);
+            var producerInterceptors = RuntimeTypeCache.ProducerInterceptorType.ResolveAll(resolver, actualMessageType);
+            var publishInterceptors = RuntimeTypeCache.PublishInterceptorType.ResolveAll(resolver, actualMessageType);
             if (producerInterceptors != null || publishInterceptors != null)
             {
                 // ToDo: Introduce CTs
@@ -341,7 +337,7 @@ namespace SlimMessageBus.Host
 
                 if (publishInterceptors != null)
                 {
-                    var publishInterceptorType = _publishInterceptorTypeCache.Get(actualMessageType);
+                    var publishInterceptorType = RuntimeTypeCache.PublishInterceptorType.Get(actualMessageType);
                     foreach (var publishInterceptor in publishInterceptors)
                     {
                         // The params follow IPublishInterceptor<>.OnHandle parameters
@@ -352,7 +348,7 @@ namespace SlimMessageBus.Host
 
                 if (producerInterceptors != null)
                 {
-                    var producerInterceptorType = _producerInterceptorTypeCache.Get(actualMessageType);
+                    var producerInterceptorType = RuntimeTypeCache.ProducerInterceptorType.Get(actualMessageType);
                     foreach (var producerInterceptor in producerInterceptors)
                     {
                         // The params follow IPublishInterceptor<>.OnHandle parameters

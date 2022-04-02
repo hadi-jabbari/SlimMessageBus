@@ -28,7 +28,9 @@
 
             OnBuildProvider();
 
-            _serializer = ProviderSettings.EnableMessageSerialization ? Settings.Serializer : new NullMessageSerializer();
+            _serializer = ProviderSettings.EnableMessageSerialization
+                ? Settings.Serializer
+                : new NullMessageSerializer();
         }
 
         #region Overrides of MessageBusBase
@@ -71,11 +73,14 @@
             // ToDo: Extension: In case of IMessageBus.Publish do not wait for the consumer method see https://github.com/zarusz/SlimMessageBus/issues/37
 
             string responseError = null;
-            Task consumerTask = null;
+            object response = null;
 
             try
             {
-                consumerTask = await ExecuteConsumer(messageType, message, messagePayload, consumer).ConfigureAwait(false);
+                // will pass a deep copy of the message (if serialization enabled) or the original message if serialization not enabled
+                var messageForConsumer = Serializer.Deserialize(messageType, messagePayload) ?? message;
+
+                response = await ExecuteConsumer(messageForConsumer, consumer).ConfigureAwait(false);
             }
             catch (Exception e)
             {
@@ -110,21 +115,14 @@
                     throw new MessageBusException($"The message header {ReqRespMessageHeaders.RequestId} was not present at this time");
                 }
 
-                if (responseError != null)
-                {
-                    await OnResponseArrived(null, path, requestId, responseError, null).ConfigureAwait(false);
-                }
-                else
-                {
-                    var response = consumer.ConsumerMethodResult(consumerTask);
-                    var responsePayload = Serializer.Serialize(consumer.ResponseType, response);
+                // will be null when serialization is not enabled
+                var responsePayload = Serializer.Serialize(consumer.ResponseType, response);
 
-                    await OnResponseArrived(responsePayload, path, requestId, null, response).ConfigureAwait(false);
-                }
+                await OnResponseArrived(responsePayload, path, requestId, responseError, response).ConfigureAwait(false);
             }
         }
 
-        private async Task<Task> ExecuteConsumer(Type messageType, object message, byte[] messagePayload, ConsumerSettings consumerSettings)
+        private async Task<object> ExecuteConsumer(object message, ConsumerSettings consumerSettings)
         {
             using var messageScope = GetMessageScope(consumerSettings, message);
 
@@ -135,16 +133,18 @@
 
             try
             {
-                var messageForConsumer = !ProviderSettings.EnableMessageSerialization
-                    ? message // prevent deep copy of the message
-                    : Serializer.Deserialize(messageType, messagePayload); // will pass a deep copy of the message
-
                 _logger.LogDebug("Executing consumer instance {Consumer} of type {ConsumerType} for message {Message}", consumerInstance, consumerSettings.ConsumerType, message);
-                var consumerTask = consumerSettings.ConsumerMethod(consumerInstance, messageForConsumer, consumerSettings.Path);
+                var consumerTask = consumerSettings.ConsumerMethod(consumerInstance, message, consumerSettings.Path);
 
                 await consumerTask.ConfigureAwait(false);
 
-                return consumerTask;
+                if (consumerSettings.ConsumerMode == ConsumerMode.RequestResponse)
+                {
+                    var response = consumerSettings.ConsumerMethodResult(consumerTask);
+                    _logger.LogDebug("Consumer instance {Consumer} of type {ConsumerType} for message {Message} has response {Response}", consumerInstance, consumerSettings.ConsumerType, message, response);
+                    return response;
+                }
+                return null;
             }
             finally
             {
