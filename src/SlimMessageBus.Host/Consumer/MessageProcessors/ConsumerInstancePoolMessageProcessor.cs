@@ -15,7 +15,7 @@ namespace SlimMessageBus.Host
         
         public AbstractConsumerSettings ConsumerSettings { get; }
 
-        public ConsumerInstancePoolMessageProcessor(ConsumerSettings consumerSettings, MessageBusBase messageBus, Func<TMessage, MessageWithHeaders> messageProvider, Action<TMessage, ConsumerContext> consumerContextInitializer = null)
+        public ConsumerInstancePoolMessageProcessor(ConsumerSettings consumerSettings, MessageBusBase messageBus, Func<TMessage, MessageWithHeaders> messageProvider, Action<object, ConsumerContext> consumerContextInitializer = null)
         {
             ConsumerSettings = consumerSettings;
             var consumerInstanceMessageProcessor = new ConsumerInstanceMessageProcessor<TMessage>(consumerSettings, messageBus, messageProvider, consumerContextInitializer);

@@ -50,7 +50,7 @@
 
                 if (!cacheExists)
                 {
-                    resolveIsEmpty = !interceptors.Any();
+                    resolveIsEmpty = interceptors == null || !interceptors.Any();
                     messageTypeToResolveIsEmpty.Set(messageType, resolveIsEmpty);
                 }
 

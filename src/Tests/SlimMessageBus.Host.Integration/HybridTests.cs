@@ -132,7 +132,7 @@ namespace SlimMessageBus.Host.Integration
             await bus.Publish(new ExternalMessage(Guid.NewGuid()));
 
             // assert
-            var expectedStoreCount = 7;
+            var expectedStoreCount = 8;
 
             // wait until arrives
             await store.WaitUntilArriving(newMessagesTimeout: 5, expectedCount: expectedStoreCount);
@@ -152,14 +152,14 @@ namespace SlimMessageBus.Host.Integration
             eventsThatHappenedWhenExternalWasPublished[1].Should().Be(nameof(ExternalMessagePublishInterceptor));
 
             // in this order
-            var eventsThatHappenedWhenExternalWasConsumed = grouping.Values.SingleOrDefault(x => x.Count == 5);
+            var eventsThatHappenedWhenExternalWasConsumed = grouping.Values.SingleOrDefault(x => x.Count == 6);
             eventsThatHappenedWhenExternalWasConsumed.Should().NotBeNull();
             eventsThatHappenedWhenExternalWasConsumed[0].Should().Be(nameof(ExternalMessageConsumerInterceptor));
             eventsThatHappenedWhenExternalWasConsumed[1].Should().Be(nameof(ExternalMessageConsumer));
             eventsThatHappenedWhenExternalWasConsumed[2].Should().Be(nameof(InternalMessageProducerInterceptor));
             eventsThatHappenedWhenExternalWasConsumed[3].Should().Be(nameof(InternalMessagePublishInterceptor));
-            //eventsThatHappenedWhenExternalWasConsumed[3].Should().Be(nameof(InternalMessageConsumerInterceptor));
-            eventsThatHappenedWhenExternalWasConsumed[4].Should().Be(nameof(InternalMessageConsumer));
+            eventsThatHappenedWhenExternalWasConsumed[4].Should().Be(nameof(InternalMessageConsumerInterceptor));
+            eventsThatHappenedWhenExternalWasConsumed[5].Should().Be(nameof(InternalMessageConsumer));
         }
 
         public class UnitOfWork

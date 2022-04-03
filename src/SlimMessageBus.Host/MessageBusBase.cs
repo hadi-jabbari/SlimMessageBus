@@ -355,7 +355,7 @@ namespace SlimMessageBus.Host
                         var interceptorParams = new object[] { message, ct, next, this, path, headers };
                         next = () => (Task)producerInterceptorType.Method.Invoke(producerInterceptor, interceptorParams);
                     }
-                }                
+                }
 
                 return next();
             }
@@ -537,9 +537,13 @@ namespace SlimMessageBus.Host
                 return Task.FromResult<Exception>(null);
             }
 
-            responseHeaders.TryGetHeader(ReqRespMessageHeaders.Error, out string errorMessage);
+            Exception responseException = null;
+            if (responseHeaders.TryGetHeader(ReqRespMessageHeaders.Error, out string errorMessage))
+            {
+                responseException = new RequestHandlerFaultedMessageBusException(errorMessage);
+            }
 
-            return OnResponseArrived(responsePayload, path, requestId, errorMessage);
+            return OnResponseArrived(responsePayload, path, requestId, responseException);
         }
 
         /// <summary>
@@ -550,7 +554,7 @@ namespace SlimMessageBus.Host
         /// <param name="requestId"></param>
         /// <param name="errorMessage"></param>
         /// <returns></returns>
-        public virtual Task<Exception> OnResponseArrived(byte[] responsePayload, string path, string requestId, string errorMessage, object response = null)
+        public virtual Task<Exception> OnResponseArrived(byte[] responsePayload, string path, string requestId, Exception responseException, object response = null)
         {
             var requestState = PendingRequestStore.GetById(requestId);
             if (requestState == null)
@@ -569,13 +573,12 @@ namespace SlimMessageBus.Host
                     _logger.LogDebug("Response arrived for {Request} on path {Path} (time: {RequestTime} ms)", requestState, path, tookTimespan);
                 }
 
-                if (errorMessage != null)
+                if (responseException != null)
                 {
                     // error response arrived
-                    _logger.LogDebug("Response arrived for {Request} on path {Path} with error: {ResponseError}", requestState, path, errorMessage);
+                    _logger.LogDebug(responseException, "Response arrived for {Request} on path {Path} with error: {ResponseError}", requestState, path, responseException.Message);
 
-                    var e = new RequestHandlerFaultedMessageBusException(errorMessage);
-                    requestState.TaskCompletionSource.TrySetException(e);
+                    requestState.TaskCompletionSource.TrySetException(responseException);
                 }
                 else
                 {

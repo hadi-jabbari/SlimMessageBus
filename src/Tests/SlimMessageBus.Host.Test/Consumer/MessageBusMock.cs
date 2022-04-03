@@ -21,6 +21,8 @@ namespace SlimMessageBus.Host.Test
         public Mock<MessageBusBase> BusMock { get; }
         public MessageBusBase Bus => BusMock.Object;
 
+        private static readonly Type[] InterceptorTypes = new[] { typeof(IConsumerInterceptor<>), typeof(IRequestHandlerInterceptor<,>) };
+
         public MessageBusMock()
         {
             ConsumerMock = new Mock<IConsumer<SomeMessage>>();
@@ -33,7 +35,7 @@ namespace SlimMessageBus.Host.Test
                 mock.Setup(x => x.Resolve(typeof(IConsumer<SomeMessage>))).Returns(ConsumerMock.Object);
                 mock.Setup(x => x.Resolve(typeof(IRequestHandler<SomeRequest, SomeResponse>))).Returns(HandlerMock.Object);
 
-                mock.Setup(x => x.Resolve(It.Is<Type>(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IEnumerable<>) && t.GetGenericArguments().Length == 1 && t.GetGenericArguments()[0].IsGenericType && t.GetGenericArguments()[0].GetGenericTypeDefinition() == typeof(IConsumerInterceptor<>))))
+                mock.Setup(x => x.Resolve(It.Is<Type>(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IEnumerable<>) && t.GetGenericArguments().Length == 1 && t.GetGenericArguments()[0].IsGenericType && InterceptorTypes.Contains(t.GetGenericArguments()[0].GetGenericTypeDefinition()))))
                     .Returns(Enumerable.Empty<object>());
             }
 

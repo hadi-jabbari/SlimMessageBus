@@ -167,6 +167,7 @@ namespace SlimMessageBus.Host.Memory.Test
             _dependencyResolverMock.VerifyNoOtherCalls();
 
             scope.Verify(x => x.Resolve(typeof(SomeMessageAConsumer)), Times.Once);
+            scope.Verify(x => x.Resolve(typeof(IEnumerable<IConsumerInterceptor<SomeMessageA>>)), Times.Once);
             scope.Verify(x => x.Dispose(), Times.Once);
             scope.VerifyNoOtherCalls();
 
@@ -206,6 +207,7 @@ namespace SlimMessageBus.Host.Memory.Test
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(SomeMessageAConsumer)), Times.Once);
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IProducerInterceptor<SomeMessageA>>)), Times.Once);
             _dependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IPublishInterceptor<SomeMessageA>>)), Times.Once);
+            _dependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IConsumerInterceptor<SomeMessageA>>)), Times.Once);
             _dependencyResolverMock.VerifyNoOtherCalls();
 
             consumerMock.Verify(x => x.OnHandle(m, topic), Times.Once);
@@ -260,6 +262,7 @@ namespace SlimMessageBus.Host.Memory.Test
 
             currentScopeDependencyResolverMock.Verify(x => x.CreateScope(), Times.Never);
             currentScopeDependencyResolverMock.Verify(x => x.Resolve(typeof(SomeMessageAConsumer)), Times.Once);
+            currentScopeDependencyResolverMock.Verify(x => x.Resolve(typeof(IEnumerable<IConsumerInterceptor<SomeMessageA>>)), Times.Once);
             currentScopeDependencyResolverMock.VerifyNoOtherCalls();
 
             consumerMock.Verify(x => x.OnHandle(m, topic), Times.Once);

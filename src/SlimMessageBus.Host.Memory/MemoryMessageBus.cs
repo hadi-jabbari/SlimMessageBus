@@ -14,7 +14,7 @@
     public class MemoryMessageBus : MessageBusBase
     {
         private readonly ILogger _logger;
-        private IDictionary<string, List<ConsumerSettings>> _consumersByPath;
+        private IDictionary<string, List<MessageHandler>> _handlersByPath;
         private readonly IMessageSerializer _serializer;
 
         private MemoryMessageBusSettings ProviderSettings { get; }
@@ -47,59 +47,52 @@
         {
             base.Build();
 
-            _consumersByPath = Settings.Consumers
+            _handlersByPath = Settings.Consumers
                 .GroupBy(x => x.Path)
-                .ToDictionary(x => x.Key, x => x.ToList());
+                .ToDictionary(x => x.Key, x => x.Select(consumerSettings => new MessageHandler(consumerSettings, this)).ToList());
         }
 
         public override async Task ProduceToTransport(Type messageType, object message, string path, byte[] messagePayload, IDictionary<string, object> messageHeaders = null)
         {
-            if (!_consumersByPath.TryGetValue(path, out var consumers) || consumers.Count == 0)
+            if (!_handlersByPath.TryGetValue(path, out var consumers) || consumers.Count == 0)
             {
                 _logger.LogDebug("No consumers interested in message type {MessageType} on path {Path}", messageType, path);
                 return;
             }
 
+            // ToDo: Extension: In case of IMessageBus.Publish do not wait for the consumer method see https://github.com/zarusz/SlimMessageBus/issues/37
+
             foreach (var consumer in consumers)
             {
-                _logger.LogDebug("Executing consumer {ConsumerType} on {Message}...", consumer.ConsumerType, message);
+                _logger.LogDebug("Executing consumer {ConsumerType} on {Message}...", consumer.ConsumerSettings.ConsumerType, message);
                 await OnMessageProduced(messageType, message, path, messagePayload, messageHeaders, consumer);
-                _logger.LogTrace("Executed consumer {ConsumerType}", consumer.ConsumerType);
+                _logger.LogTrace("Executed consumer {ConsumerType}", consumer.ConsumerSettings.ConsumerType);
             }
         }
 
-        private async Task OnMessageProduced(Type messageType, object message, string path, byte[] messagePayload, IDictionary<string, object> messageHeaders, ConsumerSettings consumer)
+        private async Task OnMessageProduced(Type messageType, object message, string path, byte[] messagePayload, IDictionary<string, object> messageHeaders, MessageHandler consumer)
         {
-            // ToDo: Extension: In case of IMessageBus.Publish do not wait for the consumer method see https://github.com/zarusz/SlimMessageBus/issues/37
-
-            string responseError = null;
             object response = null;
+            string requestId = null;
 
+            Exception responseException;
             try
             {
                 // will pass a deep copy of the message (if serialization enabled) or the original message if serialization not enabled
                 var messageForConsumer = Serializer.Deserialize(messageType, messagePayload) ?? message;
 
-                response = await ExecuteConsumer(messageForConsumer, consumer).ConfigureAwait(false);
+                (response, responseException, requestId) = await consumer.DoHandle(message: messageForConsumer, messageHeaders: messageHeaders, nativeMessage: null).ConfigureAwait(false);
             }
             catch (Exception e)
             {
-                _logger.LogDebug(e, "Error occured while executing {ConsumerType} on {Message}", consumer.ConsumerType, message);
+                _logger.LogDebug(e, "Error occured while executing {ConsumerType} on {Message}", consumer.ConsumerSettings.ConsumerType, message);
 
-                try
-                {
-                    // Invoke fault handler.
-                    (consumer.OnMessageFault ?? Settings.OnMessageFault)?.Invoke(this, consumer, message, e, null);
-                }
-                catch (Exception hookEx)
-                {
-                    HookFailed(_logger, hookEx, nameof(consumer.OnMessageFault));
-                }
+                OnMessageFailed(message, consumer, e);
 
-                if (consumer.ConsumerMode == ConsumerMode.RequestResponse)
+                if (consumer.ConsumerSettings.ConsumerMode == ConsumerMode.RequestResponse)
                 {
                     // When in request response mode then pass the error back to the sender
-                    responseError = e.Message;
+                    responseException = e;
                 }
                 else
                 {
@@ -108,51 +101,26 @@
                 }
             }
 
-            if (consumer.ConsumerMode == ConsumerMode.RequestResponse)
+            if (consumer.ConsumerSettings.ConsumerMode == ConsumerMode.RequestResponse)
             {
-                if (messageHeaders == null || !messageHeaders.TryGetHeader(ReqRespMessageHeaders.RequestId, out string requestId))
-                {
-                    throw new MessageBusException($"The message header {ReqRespMessageHeaders.RequestId} was not present at this time");
-                }
-
                 // will be null when serialization is not enabled
-                var responsePayload = Serializer.Serialize(consumer.ResponseType, response);
+                var responsePayload = Serializer.Serialize(consumer.ConsumerSettings.ResponseType, response);
 
-                await OnResponseArrived(responsePayload, path, requestId, responseError, response).ConfigureAwait(false);
+                await OnResponseArrived(responsePayload, path, requestId, responseException, response).ConfigureAwait(false);
             }
         }
 
-        private async Task<object> ExecuteConsumer(object message, ConsumerSettings consumerSettings)
+        private void OnMessageFailed(object message, MessageHandler consumer, Exception e)
         {
-            using var messageScope = GetMessageScope(consumerSettings, message);
-
-            // obtain the consumer from chosen DI container (root or scope)
-            _logger.LogDebug("Resolving consumer type {ConsumerType}", consumerSettings.ConsumerType);
-            var consumerInstance = messageScope.Resolve(consumerSettings.ConsumerType)
-                ?? throw new ConfigurationMessageBusException($"The dependency resolver does not know how to create an instance of {consumerSettings.ConsumerType}");
-
             try
             {
-                _logger.LogDebug("Executing consumer instance {Consumer} of type {ConsumerType} for message {Message}", consumerInstance, consumerSettings.ConsumerType, message);
-                var consumerTask = consumerSettings.ConsumerMethod(consumerInstance, message, consumerSettings.Path);
-
-                await consumerTask.ConfigureAwait(false);
-
-                if (consumerSettings.ConsumerMode == ConsumerMode.RequestResponse)
-                {
-                    var response = consumerSettings.ConsumerMethodResult(consumerTask);
-                    _logger.LogDebug("Consumer instance {Consumer} of type {ConsumerType} for message {Message} has response {Response}", consumerInstance, consumerSettings.ConsumerType, message, response);
-                    return response;
-                }
-                return null;
+                // Invoke fault handler.
+                consumer.ConsumerSettings.OnMessageFault?.Invoke(this, consumer.ConsumerSettings, message, e, null);
+                Settings.OnMessageFault?.Invoke(this, consumer.ConsumerSettings, message, e, null);
             }
-            finally
+            catch (Exception hookEx)
             {
-                if (consumerSettings.IsDisposeConsumerEnabled && consumerInstance is IDisposable consumerInstanceDisposable)
-                {
-                    _logger.LogDebug("Dosposing consumer instance {Consumer} of type {ConsumerType}", consumerInstance, consumerSettings.ConsumerType);
-                    consumerInstanceDisposable.DisposeSilently("ConsumerInstance", _logger);
-                }
+                HookFailed(_logger, hookEx, nameof(consumer.ConsumerSettings.OnMessageFault));
             }
         }
 

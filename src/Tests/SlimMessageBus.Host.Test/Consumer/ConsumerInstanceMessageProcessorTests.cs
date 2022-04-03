@@ -36,6 +36,7 @@
             {
                 var m = EmptyMessageWithHeadersProvider(request);
                 m.Headers.SetHeader(ReqRespMessageHeaders.Expires, _busMock.CurrentTime.AddSeconds(-10));
+                m.Headers.SetHeader(ReqRespMessageHeaders.RequestId, "request-id");
                 return m;
             }
 
