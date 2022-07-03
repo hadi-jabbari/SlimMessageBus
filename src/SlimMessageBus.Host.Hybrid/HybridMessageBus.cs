@@ -8,8 +8,9 @@
     using Microsoft.Extensions.Logging.Abstractions;
     using SlimMessageBus.Host.Collections;
     using SlimMessageBus.Host.Config;
+    using SlimMessageBus.Host.DependencyResolver;
 
-    public class HybridMessageBus : IMessageBus, IConsumerControl, IAsyncDisposable
+    public class HybridMessageBus : IMasterMessageBus, IAsyncDisposable
     {
         private readonly ILogger _logger;
 
@@ -21,10 +22,10 @@
         private readonly ProducerByMessageTypeCache<string> _busNameByMessageType;
         private readonly IDictionary<string, MessageBusBase> _busByName;
 
-        public HybridMessageBus(MessageBusSettings settings, HybridMessageBusSettings providerSettings)
+        public HybridMessageBus(MessageBusSettings settings, HybridMessageBusSettings providerSettings, MessageBusBuilder mbb)
         {
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
-            ProviderSettings = providerSettings ?? throw new ArgumentNullException(nameof(providerSettings));
+            ProviderSettings = providerSettings ?? new HybridMessageBusSettings();
 
             // Use the configured logger factory, if not provided try to resolve from DI, if also not available supress logging using the NullLoggerFactory
             LoggerFactory = settings.LoggerFactory
@@ -37,28 +38,28 @@
             _busNameByMessageType = new ProducerByMessageTypeCache<string>(_logger, busNameByBaseMessageType);
 
             _busByName = new Dictionary<string, MessageBusBase>();
-            foreach (var name in providerSettings.Keys)
+            foreach (var childBus in providerSettings ?? mbb.ChildBuilders)
             {
-                var builderFunc = providerSettings[name];
-
-                var bus = BuildBus(builderFunc);
-                _busByName.Add(name, bus);
+                var bus = BuildBus(childBus.Value, childBus.Key, mbb);
+                _busByName.Add(childBus.Key, bus);
 
                 // Register producer routes based on MessageType
                 foreach (var producer in bus.Settings.Producers)
                 {
-                    busNameByBaseMessageType.Add(producer.MessageType, name);
+                    busNameByBaseMessageType.Add(producer.MessageType, childBus.Key);
                 }
             }
 
             // ToDo: defer start of busses until here
         }
 
-        protected virtual MessageBusBase BuildBus(Action<MessageBusBuilder> builderFunc)
+        protected virtual MessageBusBase BuildBus(Action<MessageBusBuilder> builderAction, string busName, MessageBusBuilder parentBuilder)
         {
             var builder = MessageBusBuilder.Create();
+            builder.BusName = busName;
+            builder.Configurators = parentBuilder.Configurators;
             builder.MergeFrom(Settings);
-            builderFunc(builder);
+            builderAction(builder);
 
             var bus = builder.Build();
 
@@ -119,7 +120,7 @@
 
         #endregion
 
-        protected virtual IMessageBus Route(object message, string path)
+        protected virtual MessageBusBase Route(object message, string path)
         {
             var messageType = message.GetType();
 
@@ -167,12 +168,24 @@
 
         #region Implementation of IPublishBus
 
-        public Task Publish<TMessage>(TMessage message, string path = null, IDictionary<string, object> headers = null)
+        public Task Publish<TMessage>(TMessage message, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default)
         {
             var bus = Route(message, path);
-            return bus.Publish(message, path, headers);
+            return bus.Publish(message, path, headers, cancellationToken);
         }
 
         #endregion
+
+        public Task Publish(object message, string path = null, IDictionary<string, object> headers = null, CancellationToken cancellationToken = default, IDependencyResolver currentDependencyResolver = null)
+        {
+            var bus = Route(message, path);
+            return bus.Publish(message, path, headers, cancellationToken, currentDependencyResolver);
+        }
+
+        public Task<TResponseMessage> SendInternal<TResponseMessage>(object request, TimeSpan? timeout, string path, IDictionary<string, object> headers, CancellationToken cancellationToken, IDependencyResolver currentDependencyResolver = null)
+        {
+            var bus = Route(request, path);
+            return bus.SendInternal<TResponseMessage>(request, timeout, path, headers, cancellationToken, currentDependencyResolver);
+        }
     }
 }

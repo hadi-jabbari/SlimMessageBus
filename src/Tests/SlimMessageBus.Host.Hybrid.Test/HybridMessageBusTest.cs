@@ -9,16 +9,17 @@ namespace SlimMessageBus.Host.Hybrid.Test
     using System;
     using System.Collections.Generic;
     using System.Text;
+    using System.Threading;
     using System.Threading.Tasks;
     using Xunit;
 
     public class HybridMessageBusTest
     {
         private readonly Lazy<HybridMessageBus> _subject;
-        private readonly MessageBusSettings _settings = new MessageBusSettings();
-        private readonly HybridMessageBusSettings _providerSettings = new HybridMessageBusSettings();
-        private readonly Mock<IDependencyResolver> _dependencyResolverMock = new Mock<IDependencyResolver>();
-        private readonly Mock<IMessageSerializer> _messageSerializerMock = new Mock<IMessageSerializer>();
+        private readonly MessageBusSettings _settings = new();
+        private readonly HybridMessageBusSettings _providerSettings = new();
+        private readonly Mock<IDependencyResolver> _dependencyResolverMock = new();
+        private readonly Mock<IMessageSerializer> _messageSerializerMock = new();
 
         private Mock<MessageBusBase> _bus1Mock;
         private Mock<MessageBusBase> _bus2Mock;
@@ -35,7 +36,7 @@ namespace SlimMessageBus.Host.Hybrid.Test
                 .Setup(x => x.Deserialize(It.IsAny<Type>(), It.IsAny<byte[]>()))
                 .Returns((Type type, byte[] payload) => JsonConvert.DeserializeObject(Encoding.UTF8.GetString(payload), type));
 
-            _subject = new Lazy<HybridMessageBus>(() => new HybridMessageBus(_settings, _providerSettings));
+            _subject = new Lazy<HybridMessageBus>(() => new HybridMessageBus(_settings, _providerSettings, MessageBusBuilder.Create()));
 
             _providerSettings["bus1"] = (mbb) =>
             {
@@ -43,7 +44,7 @@ namespace SlimMessageBus.Host.Hybrid.Test
                 {
                     _bus1Mock = new Mock<MessageBusBase>(new[] { mbs });
                     _bus1Mock.SetupGet(x => x.Settings).Returns(mbs);
-                    _bus1Mock.Setup(x => x.Publish(It.IsAny<SomeMessage>(), It.IsAny<string>(), It.IsAny<IDictionary<string, object>>())).Returns(Task.CompletedTask);
+                    _bus1Mock.Setup(x => x.Publish(It.IsAny<SomeMessage>(), It.IsAny<string>(), It.IsAny<IDictionary<string, object>>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
                     return _bus1Mock.Object;
                 });
@@ -72,12 +73,26 @@ namespace SlimMessageBus.Host.Hybrid.Test
             // act
             await _subject.Value.Publish(someMessage);
             await _subject.Value.Publish(someDerivedMessage);
+            await _subject.Value.Publish<SomeMessage>(someDerivedMessage);
+            await _subject.Value.Publish<ISomeMessageMarkerInterface>(someDerivedMessage);
             await _subject.Value.Publish(someDerivedOfDerivedMessage);
+            await _subject.Value.Publish<SomeMessage>(someDerivedOfDerivedMessage);
+            await _subject.Value.Publish<ISomeMessageMarkerInterface>(someDerivedOfDerivedMessage);
 
             // assert
-            _bus1Mock.Verify(x => x.Publish(someMessage, null, null), Times.Once);
-            _bus1Mock.Verify(x => x.Publish(someDerivedMessage, null, null), Times.Once);
-            _bus1Mock.Verify(x => x.Publish(someDerivedOfDerivedMessage, null, null), Times.Once);
+            
+            // note: Moq does not match exact generic types but with match with assignment compatibility
+            // - cannot count the exact times a specific generic method ws executed
+            // see https://stackoverflow.com/a/54721582
+            _bus1Mock.Verify(x => x.Publish(someMessage, null, null, It.IsAny<CancellationToken>()));
+            _bus1Mock.Verify(x => x.Publish(someDerivedMessage, null, null, It.IsAny<CancellationToken>()));
+            _bus1Mock.Verify(x => x.Publish<SomeMessage>(someDerivedMessage, null, null, It.IsAny<CancellationToken>()));
+            _bus1Mock.Verify(x => x.Publish<ISomeMessageMarkerInterface>(someDerivedMessage, null, null, It.IsAny<CancellationToken>()));
+            _bus1Mock.Verify(x => x.Publish(someDerivedOfDerivedMessage, null, null, It.IsAny<CancellationToken>()));
+            _bus1Mock.Verify(x => x.Publish<SomeMessage>(someDerivedOfDerivedMessage, null, null, It.IsAny<CancellationToken>()));
+            _bus1Mock.Verify(x => x.Publish<ISomeMessageMarkerInterface>(someDerivedOfDerivedMessage, null, null, It.IsAny<CancellationToken>()));
+            _bus1Mock.VerifyGet(x => x.Settings, Times.Once);
+            _bus1Mock.VerifyNoOtherCalls();
         }
 
         [Fact]
@@ -108,7 +123,11 @@ namespace SlimMessageBus.Host.Hybrid.Test
             await notDeclaredTypePublish.Should().ThrowAsync<ConfigurationMessageBusException>();
         }
 
-        internal class SomeMessage
+        internal interface ISomeMessageMarkerInterface
+        {
+        }
+
+        internal class SomeMessage : ISomeMessageMarkerInterface
         {
         }
 
@@ -120,7 +139,7 @@ namespace SlimMessageBus.Host.Hybrid.Test
         {
         }
 
-        internal class SomeRequest : IRequestMessage<SomeResponse>
+        internal class SomeRequest : IRequestMessage<SomeResponse>, ISomeMessageMarkerInterface
         {
         }
 

@@ -3,6 +3,7 @@
     using System;
     using System.Collections.Generic;
     using System.Linq;
+    using System.Threading;
     using System.Threading.Tasks;
     using Azure.Messaging.ServiceBus;
     using Microsoft.Extensions.Logging;
@@ -140,16 +141,15 @@
             }
         }
 
-        public override async Task ProduceToTransport(Type messageType, object message, string path, byte[] messagePayload, IDictionary<string, object> messageHeaders)
+        public override async Task ProduceToTransport(object message, string path, byte[] messagePayload, IDictionary<string, object> messageHeaders, CancellationToken cancellationToken)
         {
-            if (messageType is null) throw new ArgumentNullException(nameof(messageType));
-            if (messagePayload is null) throw new ArgumentNullException(nameof(messagePayload));
+            var messageType = message.GetType();
 
             AssertActive();
 
-            logger.LogDebug("Producing message {Message} of type {MessageType} to path {Path} with size {MessageSize}", message, messageType.Name, path, messagePayload.Length);
+            logger.LogDebug("Producing message {Message} of type {MessageType} to path {Path} with size {MessageSize}", message, messageType.Name, path, messagePayload?.Length ?? 0);
 
-            var m = new ServiceBusMessage(messagePayload);
+            var m = messagePayload != null ? new ServiceBusMessage(messagePayload) : new ServiceBusMessage();
 
             // add headers
             if (messageHeaders != null)
@@ -177,7 +177,7 @@
 
             try
             {
-                await senderClient.SendMessageAsync(m).ConfigureAwait(false);
+                await senderClient.SendMessageAsync(m, cancellationToken: cancellationToken).ConfigureAwait(false);
 
                 logger.LogDebug("Delivered message {Message} of type {MessageType} to {Path}", message, messageType.Name, path);
             }
